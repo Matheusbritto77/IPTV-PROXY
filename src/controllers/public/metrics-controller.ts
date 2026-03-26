@@ -5,7 +5,6 @@ import { adminUpstreamService } from "../../services/admin/admin-upstream-servic
 import { metricsHistoryService } from "../../services/public/metrics-history-service";
 import { requestGuardService } from "../../services/public/request-guard-service";
 import { sessionCacheService } from "../../services/public/session-cache-service";
-import { cacheService } from "../../services/proxy/cache-service";
 import { upstreamHealthService } from "../../services/proxy/upstream-health-service";
 
 export class MetricsController {
@@ -35,7 +34,6 @@ export class MetricsController {
         ...sessionMetrics,
         ...guardMetrics,
       },
-      cache: cacheService.getMetrics(),
       upstreams: upstreamStatuses,
       timestamp: new Date().toISOString(),
     };

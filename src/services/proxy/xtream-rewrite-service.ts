@@ -28,27 +28,6 @@ export class XtreamRewriteService {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  private preferredOutputFormats(currentFormats: unknown) {
-    const values = Array.isArray(currentFormats)
-      ? currentFormats.filter((item): item is string => typeof item === "string")
-      : [];
-    const preferred = env.PREFERRED_LIVE_FORMAT === "auto" ? [] : [env.PREFERRED_LIVE_FORMAT];
-    const fallback = ["m3u8", "ts"];
-    return [...new Set([...preferred, ...values, ...fallback])];
-  }
-
-  private applyPreferredContainerExtension(payload: Record<string, any>) {
-    if (
-      env.PREFERRED_VOD_FORMAT !== "auto" &&
-      typeof payload.container_extension === "string" &&
-      ["mp4", "m3u8"].includes(payload.container_extension)
-    ) {
-      payload.container_extension = env.PREFERRED_VOD_FORMAT;
-    }
-
-    return payload;
-  }
-
   rewritePlayerApi(payload: any, context: RewriteContext) {
     const appUrl = this.appUrl();
     const publicProtocol = env.APP_PUBLIC_PROTOCOL === "auto" ? appUrl.protocol.replace(":", "") : env.APP_PUBLIC_PROTOCOL;
@@ -67,7 +46,6 @@ export class XtreamRewriteService {
       created_at: unix(new Date(context.user.createdAt)),
       active_cons: String(Math.max(Number(upstreamUserInfo.active_cons || 0), 1)),
       max_connections: String(context.user.maxConnections),
-      allowed_output_formats: this.preferredOutputFormats(upstreamUserInfo.allowed_output_formats),
     };
 
     cloned.server_info = {
@@ -155,7 +133,7 @@ export class XtreamRewriteService {
 
         clone[key] = this.rewritePayload(value, context);
       }
-      return this.applyPreferredContainerExtension(clone);
+      return clone;
     }
 
     return payload;

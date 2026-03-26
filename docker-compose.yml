@@ -24,9 +24,6 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 8080
       APP_BASE_URL: ${APP_BASE_URL:-https://renttool.store}
-      APP_PUBLIC_PROTOCOL: ${APP_PUBLIC_PROTOCOL:-https}
-      PREFERRED_LIVE_FORMAT: ${PREFERRED_LIVE_FORMAT:-auto}
-      PREFERRED_VOD_FORMAT: ${PREFERRED_VOD_FORMAT:-auto}
       APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
       STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
       APP_NAME: ${APP_NAME:-P2P Gateway}
@@ -36,14 +33,9 @@ services:
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
-      UPSTREAM_MAX_IDLE_CONNECTIONS: ${UPSTREAM_MAX_IDLE_CONNECTIONS:-256}
-      UPSTREAM_MAX_CONNECTIONS_PER_HOST: ${UPSTREAM_MAX_CONNECTIONS_PER_HOST:-128}
-      UPSTREAM_IDLE_TIMEOUT_MS: ${UPSTREAM_IDLE_TIMEOUT_MS:-90000}
-      UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS: ${UPSTREAM_TLS_HANDSHAKE_TIMEOUT_MS:-5000}
       STREAM_MODE: ${STREAM_MODE:-proxy}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-admin-token}
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
-      ACCESS_PASSWORD_ENCRYPTION_KEY: ${ACCESS_PASSWORD_ENCRYPTION_KEY:-change-me-access-password-key}
       OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
       STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
       BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
@@ -82,30 +74,54 @@ services:
       start_period: 40s
 
   stream-relay:
-    image: p2p-stream-relay:latest
+    image: p2p-gateway:latest
     build:
       context: .
-      dockerfile: Dockerfile.relay
+      dockerfile: Dockerfile
     container_name: p2p-stream-relay
     restart: unless-stopped
+    command: ["bun", "run", "start:relay"]
     environment:
       NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      APP_BASE_URL: ${APP_BASE_URL:-https://renttool.store}
+      APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
+      STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
+      APP_NAME: ${APP_NAME:-P2P Gateway}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/p2p_gateway
+      REDIS_URL: redis://redis:6379
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-300}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
+      STREAM_MODE: ${STREAM_MODE:-proxy}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-admin-token}
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
+      OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
       STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
-      STREAM_RELAY_REQUEST_TIMEOUT_MS: ${STREAM_RELAY_REQUEST_TIMEOUT_MS:-12000}
-      STREAM_RELAY_MAX_IDLE_CONNS: ${STREAM_RELAY_MAX_IDLE_CONNS:-512}
-      STREAM_RELAY_MAX_IDLE_CONNS_PER_HOST: ${STREAM_RELAY_MAX_IDLE_CONNS_PER_HOST:-256}
-      STREAM_RELAY_MAX_CONNS_PER_HOST: ${STREAM_RELAY_MAX_CONNS_PER_HOST:-256}
-      STREAM_RELAY_IDLE_CONN_TIMEOUT_MS: ${STREAM_RELAY_IDLE_CONN_TIMEOUT_MS:-90000}
-      STREAM_RELAY_RESPONSE_HEADER_TIMEOUT_MS: ${STREAM_RELAY_RESPONSE_HEADER_TIMEOUT_MS:-10000}
-      STREAM_RELAY_TLS_HANDSHAKE_TIMEOUT_MS: ${STREAM_RELAY_TLS_HANDSHAKE_TIMEOUT_MS:-5000}
+      BOOTSTRAP_ENABLED: "false"
+      BOOTSTRAP_UPSTREAM_NAME: ${BOOTSTRAP_UPSTREAM_NAME:-}
+      BOOTSTRAP_UPSTREAM_SMARTERS_URL: ${BOOTSTRAP_UPSTREAM_SMARTERS_URL:-}
+      BOOTSTRAP_UPSTREAM_XCIPTV_DNS: ${BOOTSTRAP_UPSTREAM_XCIPTV_DNS:-}
+      BOOTSTRAP_UPSTREAM_USERNAME: ${BOOTSTRAP_UPSTREAM_USERNAME:-}
+      BOOTSTRAP_UPSTREAM_PASSWORD: ${BOOTSTRAP_UPSTREAM_PASSWORD:-}
     expose:
       - "8081"
     depends_on:
-      app:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz || exit 1"]
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const response = await fetch('http://127.0.0.1:8081/healthz'); if (!response.ok) process.exit(1);",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12

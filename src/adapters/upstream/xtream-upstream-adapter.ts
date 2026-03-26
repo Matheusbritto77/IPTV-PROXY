@@ -1,6 +1,4 @@
 import axios, { type AxiosInstance } from "axios";
-import http from "node:http";
-import https from "node:https";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
 import { HttpError } from "../../utils/http-error";
@@ -15,25 +13,8 @@ export class XtreamUpstreamAdapter {
   private readonly client: AxiosInstance;
 
   constructor() {
-    const httpAgent = new http.Agent({
-      keepAlive: true,
-      maxTotalSockets: env.UPSTREAM_MAX_IDLE_CONNECTIONS,
-      maxSockets: env.UPSTREAM_MAX_CONNECTIONS_PER_HOST,
-      maxFreeSockets: env.UPSTREAM_MAX_CONNECTIONS_PER_HOST,
-      timeout: env.UPSTREAM_IDLE_TIMEOUT_MS,
-    });
-    const httpsAgent = new https.Agent({
-      keepAlive: true,
-      maxTotalSockets: env.UPSTREAM_MAX_IDLE_CONNECTIONS,
-      maxSockets: env.UPSTREAM_MAX_CONNECTIONS_PER_HOST,
-      maxFreeSockets: env.UPSTREAM_MAX_CONNECTIONS_PER_HOST,
-      timeout: env.UPSTREAM_IDLE_TIMEOUT_MS,
-    });
-
     this.client = axios.create({
       timeout: env.UPSTREAM_TIMEOUT_MS,
-      httpAgent,
-      httpsAgent,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) IPTVStreamPlayer/1.0",
@@ -194,7 +175,6 @@ export class XtreamUpstreamAdapter {
 
   private callPlayerApi(credentials: UpstreamCredentials, params?: Record<string, string | undefined>) {
     const url = `${credentials.baseUrl}/player_api.php`;
-    const startedAt = performance.now();
     return this.client.get(url, {
       params: {
         username: credentials.username,
@@ -208,7 +188,6 @@ export class XtreamUpstreamAdapter {
           upstreamUrl: url,
           action: params?.action || "player_api",
           status: response.status,
-          latencyMs: Number((performance.now() - startedAt).toFixed(2)),
           contentType: response.headers["content-type"],
           auth: response.data?.user_info?.auth,
           body: Number(response.data?.user_info?.auth ?? 1) === 0 ? response.data : undefined,
