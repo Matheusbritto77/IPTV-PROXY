@@ -43,8 +43,8 @@ async function bootstrap() {
   await redis.connect().catch(() => null);
 
   const app = createStreamRelayApp();
-  server = app.listen(env.STREAM_RELAY_PORT, () => {
-    logger.info({ port: env.STREAM_RELAY_PORT }, "stream_relay_started");
+  server = app.listen(env.STREAM_RELAY_PORT, "0.0.0.0", () => {
+    logger.info({ port: env.STREAM_RELAY_PORT, host: "0.0.0.0" }, "stream_relay_started");
   });
 }
 
