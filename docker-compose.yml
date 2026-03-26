@@ -68,9 +68,10 @@ services:
           "-e",
           "const response = await fetch('http://127.0.0.1:8080/health'); if (!response.ok) process.exit(1);",
         ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   stream-relay:
     image: p2p-gateway:latest
@@ -121,9 +122,10 @@ services:
           "-e",
           "const response = await fetch('http://127.0.0.1:8081/healthz'); if (!response.ok) process.exit(1);",
         ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   openresty:
     image: openresty/openresty:alpine
@@ -148,9 +150,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/healthz || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
   postgres:
     image: postgres:16
@@ -162,9 +165,10 @@ services:
       POSTGRES_DB: p2p_gateway
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d p2p_gateway"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 10s
 
   redis:
     image: redis:7
@@ -173,6 +177,7 @@ services:
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
