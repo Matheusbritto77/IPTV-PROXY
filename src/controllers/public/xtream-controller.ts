@@ -91,7 +91,9 @@ export class XtreamController {
 
   async playlist(req: Request, res: Response) {
     const { username, password } = getCredentials(req);
-    const output = req.query.output?.toString() || "ts";
+    const output =
+      req.query.output?.toString() ||
+      (env.PREFERRED_LIVE_FORMAT !== "auto" ? env.PREFERRED_LIVE_FORMAT : "ts");
 
     const { user } = await authService.authenticate({
       username,
