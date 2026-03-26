@@ -1,0 +1,195 @@
+services:
+  migrate:
+    image: p2p-gateway:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p2p-migrate
+    restart: "no"
+    command: ["bun", "run", "start:migrate"]
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      APP_BASE_URL: ${APP_BASE_URL}
+      APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
+      STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
+      APP_NAME: ${APP_NAME:-P2P Gateway}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/p2p_gateway
+      REDIS_URL: redis://redis:6379
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-300}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
+      STREAM_MODE: ${STREAM_MODE:-proxy}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
+      STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
+      BOOTSTRAP_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    image: p2p-gateway:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p2p-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      APP_BASE_URL: ${APP_BASE_URL}
+      APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
+      STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
+      APP_NAME: ${APP_NAME:-P2P Gateway}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/p2p_gateway
+      REDIS_URL: redis://redis:6379
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-300}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
+      STREAM_MODE: ${STREAM_MODE:-proxy}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
+      STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
+      BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
+      BOOTSTRAP_CLIENT_NAME: ${BOOTSTRAP_CLIENT_NAME:-}
+      BOOTSTRAP_USERNAME: ${BOOTSTRAP_USERNAME:-}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      BOOTSTRAP_EXPIRES_AT: ${BOOTSTRAP_EXPIRES_AT:-}
+      BOOTSTRAP_MAX_CONNECTIONS: ${BOOTSTRAP_MAX_CONNECTIONS:-0}
+      BOOTSTRAP_UPSTREAM_NAME: ${BOOTSTRAP_UPSTREAM_NAME:-}
+      BOOTSTRAP_UPSTREAM_SMARTERS_URL: ${BOOTSTRAP_UPSTREAM_SMARTERS_URL:-}
+      BOOTSTRAP_UPSTREAM_XCIPTV_DNS: ${BOOTSTRAP_UPSTREAM_XCIPTV_DNS:-}
+      BOOTSTRAP_UPSTREAM_USERNAME: ${BOOTSTRAP_UPSTREAM_USERNAME:-}
+      BOOTSTRAP_UPSTREAM_PASSWORD: ${BOOTSTRAP_UPSTREAM_PASSWORD:-}
+    expose:
+      - "8080"
+    volumes:
+      - ./docs/generated:/app/docs/generated
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const response = await fetch('http://127.0.0.1:8080/health'); if (!response.ok) process.exit(1);",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  stream-relay:
+    image: p2p-gateway:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p2p-stream-relay
+    restart: unless-stopped
+    command: ["bun", "run", "start:relay"]
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      APP_BASE_URL: ${APP_BASE_URL}
+      APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
+      STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
+      APP_NAME: ${APP_NAME:-P2P Gateway}
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/p2p_gateway
+      REDIS_URL: redis://redis:6379
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-300}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
+      STREAM_MODE: ${STREAM_MODE:-proxy}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
+      STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
+      BOOTSTRAP_ENABLED: "false"
+      BOOTSTRAP_UPSTREAM_NAME: ${BOOTSTRAP_UPSTREAM_NAME:-}
+      BOOTSTRAP_UPSTREAM_SMARTERS_URL: ${BOOTSTRAP_UPSTREAM_SMARTERS_URL:-}
+      BOOTSTRAP_UPSTREAM_XCIPTV_DNS: ${BOOTSTRAP_UPSTREAM_XCIPTV_DNS:-}
+      BOOTSTRAP_UPSTREAM_USERNAME: ${BOOTSTRAP_UPSTREAM_USERNAME:-}
+      BOOTSTRAP_UPSTREAM_PASSWORD: ${BOOTSTRAP_UPSTREAM_PASSWORD:-}
+    expose:
+      - "8081"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const response = await fetch('http://127.0.0.1:8081/healthz'); if (!response.ok) process.exit(1);",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openresty:
+    image: openresty/openresty:alpine
+    container_name: p2p-openresty
+    restart: unless-stopped
+    environment:
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      APP_UPSTREAM_ORIGIN: ${OPENRESTY_APP_ORIGIN:-http://app:8080}
+      STREAM_RELAY_ORIGIN: ${OPENRESTY_STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
+    ports:
+      - "${OPENRESTY_PORT:-8090}:8090"
+    volumes:
+      - ./openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+      stream-relay:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16
+    container_name: p2p-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: p2p_gateway
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d p2p_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: p2p-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

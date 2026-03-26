@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum UpstreamType {
+  XTREAM
+  CUSTOM
+}
+
+enum UpstreamStatus {
+  ACTIVE
+  DEGRADED
+  DISABLED
+}
+
+enum StreamSessionStatus {
+  ACTIVE
+  CLOSED
+}
+
+model User {
+  id               String          @id @default(cuid())
+  fullName         String
+  username         String          @unique
+  passwordHash     String
+  status           UserStatus      @default(ACTIVE)
+  expiresAt        DateTime
+  maxConnections   Int             @default(1)
+  allowedIps       String[]
+  metadata         Json?
+  upstreamId       String
+  upstreamUsername String
+  upstreamPassword String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  upstream         Upstream        @relation(fields: [upstreamId], references: [id])
+  sessions         StreamSession[]
+  auditLogs        AuditLog[]
+}
+
+model Upstream {
+  id         String         @id @default(cuid())
+  name       String
+  smartersUrl String
+  xciptvDns  String?
+  type       UpstreamType   @default(XTREAM)
+  authMode   String         @default("xtream")
+  status     UpstreamStatus @default(ACTIVE)
+  timeoutMs  Int            @default(8000)
+  metadata   Json?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  users      User[]
+}
+
+model StreamSession {
+  id         String              @id @default(cuid())
+  userId     String
+  ipAddress  String
+  userAgent  String?
+  deviceId   String?
+  streamType String?
+  streamId   String?
+  status     StreamSessionStatus @default(ACTIVE)
+  startedAt  DateTime            @default(now())
+  lastSeenAt DateTime            @default(now())
+  endedAt    DateTime?
+  user       User                @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  eventType String
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}

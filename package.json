@@ -1,0 +1,38 @@
+{
+  "name": "p2p-gateway",
+  "module": "src/server.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/server.ts",
+    "dev:relay": "bun run --watch src/stream-relay-server.ts",
+    "start": "bun run src/server.ts",
+    "start:relay": "bun run src/stream-relay-server.ts",
+    "start:migrate": "bun run src/scripts/run-init-migration.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.5.0",
+    "axios": "^1.13.6",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.10.1",
+    "lru-cache": "^11.2.7",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "prisma": "^7.5.0",
+    "xmlbuilder2": "^4.0.3",
+    "zod": "^4.3.6"
+  }
+}

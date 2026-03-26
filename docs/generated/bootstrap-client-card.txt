@@ -1,0 +1,6 @@
+Cliente -> Demo Local
+Login: 123456
+Senha: 123456
+SMARTER: http://localhost:8090
+DNS XCIPTV: http://localhost:8090
+Vencimento: 31/12/2026

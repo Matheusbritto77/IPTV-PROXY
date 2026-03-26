@@ -1,0 +1,5 @@
+node_modules
+.git
+.DS_Store
+docs/generated
+python_smarters_player/.venv
