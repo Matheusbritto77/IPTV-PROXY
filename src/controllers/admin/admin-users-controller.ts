@@ -156,10 +156,17 @@ export class AdminUsersController {
 
   async getCard(req: Request, res: Response) {
     const user = await adminUserService.getById(req.params.id);
+    const accessPassword =
+      (user.metadata &&
+        typeof user.metadata === "object" &&
+        "accessPassword" in user.metadata &&
+        typeof (user.metadata as Record<string, unknown>).accessPassword === "string" &&
+        (user.metadata as Record<string, unknown>).accessPassword) ||
+      "senha_nao_disponivel";
     const card = renderClientCard({
       clientName: user.fullName,
       username: user.username,
-      password: "●●●●●●●●",
+      password: accessPassword,
       smartersUrl: env.APP_BASE_URL,
       xciptvDns: env.APP_BASE_URL,
       expiresAt: new Date(user.expiresAt).toLocaleDateString("pt-BR"),

@@ -59,4 +59,5 @@ export type UserUpdateInput = {
   upstreamId?: string;
   upstreamUsername?: string;
   upstreamPassword?: string;
+  metadata?: unknown;
 };

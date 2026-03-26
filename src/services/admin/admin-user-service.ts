@@ -43,6 +43,9 @@ export class AdminUserService {
       expiresAt: new Date(input.expiresAt),
       maxConnections: input.maxConnections,
       allowedIps: input.allowedIps || [],
+      metadata: {
+        accessPassword: input.password,
+      },
       upstreamId: input.upstreamId,
       upstreamUsername: env.BOOTSTRAP_UPSTREAM_USERNAME || "",
       upstreamPassword: env.BOOTSTRAP_UPSTREAM_PASSWORD || "",
@@ -63,6 +66,8 @@ export class AdminUserService {
   }
 
   async update(input: UpdateUserInput) {
+    const existingUser = await this.getById(input.id);
+
     if (input.upstreamId) {
       const upstream = await upstreamRepository.findById(input.upstreamId);
       if (!upstream) {
@@ -78,6 +83,13 @@ export class AdminUserService {
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : undefined,
       maxConnections: input.maxConnections,
       allowedIps: input.allowedIps,
+      metadata:
+        input.password !== undefined
+          ? {
+              ...((existingUser.metadata as Record<string, unknown>) || {}),
+              accessPassword: input.password,
+            }
+          : undefined,
       upstreamId: input.upstreamId,
       upstreamUsername: env.BOOTSTRAP_UPSTREAM_USERNAME,
       upstreamPassword: env.BOOTSTRAP_UPSTREAM_PASSWORD,

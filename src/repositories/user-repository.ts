@@ -71,6 +71,7 @@ export class UserRepository {
     expiresAt: Date;
     maxConnections: number;
     allowedIps: string[];
+    metadata?: unknown;
     upstreamId: string;
     upstreamUsername: string;
     upstreamPassword: string;
@@ -78,10 +79,12 @@ export class UserRepository {
     const rows = await sql`
       INSERT INTO "User" (
         "id", "fullName", "username", "passwordHash", "expiresAt",
+        "metadata",
         "maxConnections", "allowedIps", "upstreamId", "upstreamUsername", "upstreamPassword"
       )
       VALUES (
         ${crypto.randomUUID()}, ${data.fullName}, ${data.username}, ${data.passwordHash}, ${data.expiresAt},
+        ${JSON.stringify(data.metadata || {})}::jsonb,
         ${data.maxConnections}, ${toPostgresTextArray(data.allowedIps)}::text[], ${data.upstreamId}, ${data.upstreamUsername}, ${data.upstreamPassword}
       )
       RETURNING *
@@ -108,6 +111,9 @@ export class UserRepository {
     if (data.maxConnections !== undefined) push("maxConnections", data.maxConnections);
     if (data.allowedIps !== undefined) {
       push("allowedIps", toPostgresTextArray(data.allowedIps), { cast: "text[]" });
+    }
+    if (data.metadata !== undefined) {
+      push("metadata", JSON.stringify(data.metadata), { cast: "jsonb" });
     }
     if (data.upstreamId !== undefined) push("upstreamId", data.upstreamId);
     if (data.upstreamUsername !== undefined) push("upstreamUsername", data.upstreamUsername);
