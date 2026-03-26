@@ -23,7 +23,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 8080
-      APP_BASE_URL: ${APP_BASE_URL}
+      APP_BASE_URL: ${APP_BASE_URL:-https://renttool.store}
       APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
       STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
       APP_NAME: ${APP_NAME:-P2P Gateway}
@@ -34,8 +34,8 @@ services:
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
       STREAM_MODE: ${STREAM_MODE:-proxy}
-      ADMIN_TOKEN: ${ADMIN_TOKEN}
-      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-admin-token}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
       OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
       STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
       BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
@@ -84,7 +84,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 8080
-      APP_BASE_URL: ${APP_BASE_URL}
+      APP_BASE_URL: ${APP_BASE_URL:-https://renttool.store}
       APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
       STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
       APP_NAME: ${APP_NAME:-P2P Gateway}
@@ -95,8 +95,8 @@ services:
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
       STREAM_MODE: ${STREAM_MODE:-proxy}
-      ADMIN_TOKEN: ${ADMIN_TOKEN}
-      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-admin-token}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
       OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
       STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
       BOOTSTRAP_ENABLED: "false"
@@ -132,7 +132,7 @@ services:
     container_name: p2p-openresty
     restart: unless-stopped
     environment:
-      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET}
+      EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
       APP_UPSTREAM_ORIGIN: ${OPENRESTY_APP_ORIGIN:-http://app:8080}
       STREAM_RELAY_ORIGIN: ${OPENRESTY_STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
     ports:
