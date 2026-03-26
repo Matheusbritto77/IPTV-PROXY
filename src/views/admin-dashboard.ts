@@ -43,6 +43,9 @@ export function renderAdminDashboard(input: DashboardInput) {
           <td>${user.maxConnections}</td>
           <td>
             <div class="actions">
+              <button class="icon-btn" onclick="showExistingUserCard('${user.id}')" title="Gerar Payload">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              </button>
               <button class="icon-btn" onclick="renewUser('${user.id}')" title="Renovar">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
               </button>
@@ -685,20 +688,32 @@ export function renderAdminDashboard(input: DashboardInput) {
 
       const data = await res.json();
       if (data.textCard) {
-        showModal(data.textCard);
+        showModal(data.textCard, true);
       } else {
         window.location.reload();
       }
     }
 
-    function showModal(content) {
+    async function showExistingUserCard(id) {
+      const res = await fetch("/admin/users/" + id + "/card", {
+        headers: { "x-admin-token": adminToken }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showModal(data.textCard, false); // false = don't reload on close
+      }
+    }
+
+    function showModal(content, shouldReload = true) {
       document.getElementById('credentials-content').innerText = content;
       document.getElementById('credentials-modal').style.display = 'flex';
+      document.getElementById('credentials-modal').dataset.shouldReload = shouldReload;
     }
 
     function closeModal() {
+      const shouldReload = document.getElementById('credentials-modal').dataset.shouldReload === "true";
       document.getElementById('credentials-modal').style.display = 'none';
-      window.location.reload();
+      if (shouldReload) window.location.reload();
     }
 
     async function copyCredentials() {

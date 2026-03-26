@@ -16,6 +16,7 @@ adminRouter.patch("/users/:id", (req, res, next) => adminUsersController.update(
 adminRouter.post("/users/:id/renew", (req, res, next) => adminUsersController.renew(req, res).catch(next));
 adminRouter.post("/users/:id/suspend", (req, res, next) => adminUsersController.suspend(req, res).catch(next));
 adminRouter.post("/users/:id/activate", (req, res, next) => adminUsersController.activate(req, res).catch(next));
+adminRouter.get("/users/:id/card", (req, res, next) => adminUsersController.getCard(req, res).catch(next));
 adminRouter.delete("/users/:id", (req, res, next) => adminUsersController.remove(req, res).catch(next));
 adminRouter.get("/upstreams", (req, res, next) => adminUpstreamsController.index(req, res).catch(next));
 adminRouter.post("/upstreams", (req, res, next) => adminUpstreamsController.create(req, res).catch(next));
