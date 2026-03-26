@@ -34,7 +34,6 @@ model User {
   fullName         String
   username         String          @unique
   passwordHash     String
-  password         String          @default("")
   status           UserStatus      @default(ACTIVE)
   expiresAt        DateTime
   maxConnections   Int             @default(1)

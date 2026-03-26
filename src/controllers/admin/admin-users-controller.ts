@@ -159,7 +159,7 @@ export class AdminUsersController {
     const card = renderClientCard({
       clientName: user.fullName,
       username: user.username,
-      password: user.password || "●●●●●●●●",
+      password: "●●●●●●●●",
       smartersUrl: env.APP_BASE_URL,
       xciptvDns: env.APP_BASE_URL,
       expiresAt: new Date(user.expiresAt).toLocaleDateString("pt-BR"),
