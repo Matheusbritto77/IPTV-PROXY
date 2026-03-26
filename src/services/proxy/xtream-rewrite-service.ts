@@ -30,6 +30,9 @@ export class XtreamRewriteService {
 
   rewritePlayerApi(payload: any, context: RewriteContext) {
     const appUrl = this.appUrl();
+    const publicProtocol = env.APP_PUBLIC_PROTOCOL === "auto" ? appUrl.protocol.replace(":", "") : env.APP_PUBLIC_PROTOCOL;
+    const isHttps = publicProtocol === "https";
+    const inferredPort = appUrl.port || (isHttps ? "443" : "80");
     const cloned = structuredClone(payload ?? {});
     const upstreamUserInfo = cloned.user_info || {};
 
@@ -48,9 +51,9 @@ export class XtreamRewriteService {
     cloned.server_info = {
       ...(cloned.server_info || {}),
       url: appUrl.hostname,
-      port: appUrl.port || "80",
-      https_port: appUrl.port || "443",
-      server_protocol: appUrl.protocol.replace(":", ""),
+      port: inferredPort,
+      https_port: isHttps ? inferredPort : "443",
+      server_protocol: publicProtocol,
       timezone: "America/Sao_Paulo",
       timestamp_now: Math.floor(Date.now() / 1000),
     };

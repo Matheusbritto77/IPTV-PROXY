@@ -5,6 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(8080),
   APP_BASE_URL: z.string().url(),
+  APP_PUBLIC_PROTOCOL: z.enum(["auto", "http", "https"]).default("auto"),
   APP_NAME: z.string().default("P2P Gateway"),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
