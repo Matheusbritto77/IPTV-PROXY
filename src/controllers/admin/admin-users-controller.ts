@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import { adminUpstreamService } from "../../services/admin/admin-upstream-service";
 import { adminUserService } from "../../services/admin/admin-user-service";
+import { decryptAccessPassword } from "../../utils/access-password-vault";
 import { renderClientCard } from "../../views/client-template";
 
 const createUserSchema = z.object({
@@ -31,6 +32,45 @@ const renewUserSchema = z.object({
 });
 
 export class AdminUsersController {
+  private getUserAccessPassword(metadata: unknown) {
+    const parsed =
+      typeof metadata === "string"
+        ? (() => {
+            try {
+              return JSON.parse(metadata);
+            } catch {
+              return null;
+            }
+          })()
+        : metadata;
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "accessPasswordEncrypted" in parsed &&
+      typeof (parsed as Record<string, unknown>).accessPasswordEncrypted === "string"
+    ) {
+      try {
+        return decryptAccessPassword(
+          (parsed as Record<string, unknown>).accessPasswordEncrypted as string,
+        );
+      } catch {
+        return "senha_nao_disponivel";
+      }
+    }
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "accessPassword" in parsed &&
+      typeof (parsed as Record<string, unknown>).accessPassword === "string"
+    ) {
+      return (parsed as Record<string, unknown>).accessPassword as string;
+    }
+
+    return "senha_nao_disponivel";
+  }
+
   async index(_req: Request, res: Response) {
     const users = await adminUserService.list();
     return res.json(
@@ -156,17 +196,10 @@ export class AdminUsersController {
 
   async getCard(req: Request, res: Response) {
     const user = await adminUserService.getById(req.params.id);
-    const accessPassword =
-      (user.metadata &&
-        typeof user.metadata === "object" &&
-        "accessPassword" in user.metadata &&
-        typeof (user.metadata as Record<string, unknown>).accessPassword === "string" &&
-        (user.metadata as Record<string, unknown>).accessPassword) ||
-      "senha_nao_disponivel";
     const card = renderClientCard({
       clientName: user.fullName,
       username: user.username,
-      password: accessPassword,
+      password: this.getUserAccessPassword(user.metadata),
       smartersUrl: env.APP_BASE_URL,
       xciptvDns: env.APP_BASE_URL,
       expiresAt: new Date(user.expiresAt).toLocaleDateString("pt-BR"),

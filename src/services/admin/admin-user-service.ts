@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { sessionRepository } from "../../repositories/session-repository";
 import { upstreamRepository } from "../../repositories/upstream-repository";
 import { userRepository } from "../../repositories/user-repository";
+import { encryptAccessPassword } from "../../utils/access-password-vault";
 import { HttpError } from "../../utils/http-error";
 import { sessionCacheService } from "../public/session-cache-service";
 
@@ -44,7 +45,7 @@ export class AdminUserService {
       maxConnections: input.maxConnections,
       allowedIps: input.allowedIps || [],
       metadata: {
-        accessPassword: input.password,
+        accessPasswordEncrypted: encryptAccessPassword(input.password),
       },
       upstreamId: input.upstreamId,
       upstreamUsername: env.BOOTSTRAP_UPSTREAM_USERNAME || "",
@@ -87,7 +88,7 @@ export class AdminUserService {
         input.password !== undefined
           ? {
               ...((existingUser.metadata as Record<string, unknown>) || {}),
-              accessPassword: input.password,
+              accessPasswordEncrypted: encryptAccessPassword(input.password),
             }
           : undefined,
       upstreamId: input.upstreamId,

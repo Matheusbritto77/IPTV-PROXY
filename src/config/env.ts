@@ -24,6 +24,7 @@ const envSchema = z.object({
   STREAM_MODE: z.enum(["redirect", "proxy"]).default("proxy"),
   ADMIN_TOKEN: z.string().min(1),
   EDGE_SHARED_SECRET: z.string().default("change-me-edge-secret"),
+  ACCESS_PASSWORD_ENCRYPTION_KEY: z.string().min(16).default("change-me-access-password-key"),
   OPENRESTY_PORT: z.coerce.number().default(8090),
   STREAM_RELAY_PORT: z.coerce.number().default(8081),
   APP_UPSTREAM_ORIGIN: z.string().url().default("http://127.0.0.1:8080"),
