@@ -1,4 +1,5 @@
 import type { User } from "../models/domain";
+import { env } from "../config/env";
 import { HttpError } from "../utils/http-error";
 
 export class AccessPolicy {
@@ -13,6 +14,10 @@ export class AccessPolicy {
   }
 
   assertIpAllowed(user: User, ipAddress: string) {
+    if (!env.IP_ALLOWLIST_ENABLED) {
+      return;
+    }
+
     if (user.allowedIps.length > 0 && !user.allowedIps.includes(ipAddress)) {
       throw new HttpError(403, "ip_not_allowed");
     }

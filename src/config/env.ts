@@ -9,6 +9,14 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   SESSION_TTL_SECONDS: z.coerce.number().default(300),
+  REQUEST_GUARD_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
+  IP_ALLOWLIST_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => value === "true"),
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().default(30),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(120),
   UPSTREAM_TIMEOUT_MS: z.coerce.number().default(8000),

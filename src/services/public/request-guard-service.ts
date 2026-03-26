@@ -16,6 +16,13 @@ export class RequestGuardService {
   }
 
   async hitRateLimit(key: string) {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return {
+        count: 0,
+        limited: false,
+      };
+    }
+
     const bucketKey = `rate:${key}`;
     const pipeline = redis.multi();
     pipeline.incr(bucketKey);
@@ -30,6 +37,10 @@ export class RequestGuardService {
   }
 
   async assertAllowed(input: GuardInput) {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return { allowed: true };
+    }
+
     if (this.isLocalDevelopmentAddress(input.ipAddress)) {
       return { allowed: true };
     }
@@ -55,6 +66,10 @@ export class RequestGuardService {
   }
 
   blockIp(ipAddress: string, ttlSeconds = 3600) {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return Promise.resolve("OK");
+    }
+
     if (this.isLocalDevelopmentAddress(ipAddress)) {
       return Promise.resolve("OK");
     }
@@ -63,15 +78,32 @@ export class RequestGuardService {
   }
 
   blockDevice(deviceId: string, ttlSeconds = 3600) {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return Promise.resolve("OK");
+    }
+
     return redis.set(`blocked:device:${deviceId}`, "1", "EX", ttlSeconds);
   }
 
   heartbeat(userId: string, deviceId?: string) {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return Promise.resolve("OK");
+    }
+
     const key = `heartbeat:${userId}:${deviceId || "default"}`;
     return redis.set(key, new Date().toISOString(), "EX", env.SESSION_TTL_SECONDS);
   }
 
   async getMetrics() {
+    if (!env.REQUEST_GUARD_ENABLED) {
+      return {
+        rateBuckets: 0,
+        blockedIps: 0,
+        blockedDevices: 0,
+        heartbeats: 0,
+      };
+    }
+
     const [rateKeys, blockedIps, blockedDevices, heartbeats] = await Promise.all([
       redis.keys("rate:*"),
       redis.keys("blocked:ip:*"),
