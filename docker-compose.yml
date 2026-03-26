@@ -135,8 +135,8 @@ services:
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
       APP_UPSTREAM_ORIGIN: ${OPENRESTY_APP_ORIGIN:-http://app:8080}
       STREAM_RELAY_ORIGIN: ${OPENRESTY_STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
-    ports:
-      - "${OPENRESTY_PORT:-8090}:8090"
+    expose:
+      - "8090"
     volumes:
       - ./openresty/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
     depends_on:

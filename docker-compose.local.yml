@@ -1,0 +1,4 @@
+services:
+  openresty:
+    ports:
+      - "${OPENRESTY_PORT:-8090}:8090"

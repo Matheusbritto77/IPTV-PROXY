@@ -27,7 +27,7 @@ Fluxo:
 
 ```bash
 cp .env.example .env
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
 Use uma `DATABASE_URL` sem `?schema=public` quando estiver rodando via `Bun.SQL`.
@@ -71,7 +71,7 @@ cp .env.example .env
 2. Suba toda a stack:
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
 3. Acesse o edge:
@@ -100,7 +100,8 @@ Servicos principais no `docker-compose.yml`:
 
 Porta publica:
 
-- `OPENRESTY_PORT` por padrao `8090`
+- no `Dockploy`, quem publica `80/443` e o `Traefik`
+- o `openresty` desta stack fica interno na porta `8090`
 
 Para `Dockploy`, use [.env.dockploy.example](/Users/matheusbritto/tuf/p2p/.env.dockploy.example) como base. O fluxo esperado e:
 
@@ -108,8 +109,9 @@ Para `Dockploy`, use [.env.dockploy.example](/Users/matheusbritto/tuf/p2p/.env.d
 2. usar `APP_BASE_URL=https://renttool.store`
 3. ajustar `ADMIN_TOKEN` e `EDGE_SHARED_SECRET`
 4. preencher `BOOTSTRAP_UPSTREAM_*` se quiser upstream inicial
-5. subir apenas o `openresty` como porta publica
-6. manter `app`, `stream-relay`, `postgres` e `redis` internos
+5. subir com o `docker-compose.yml` base, sem publicar porta do `openresty`
+6. no painel do `Dockploy`, apontar o dominio `renttool.store` para o servico `openresty` na porta interna `8090`
+7. manter `app`, `stream-relay`, `postgres` e `redis` internos
 
 ## Estrutura
 
