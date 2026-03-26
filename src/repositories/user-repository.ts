@@ -68,6 +68,7 @@ export class UserRepository {
     fullName: string;
     username: string;
     passwordHash: string;
+    password: string;
     expiresAt: Date;
     maxConnections: number;
     allowedIps: string[];
@@ -77,11 +78,11 @@ export class UserRepository {
   }) {
     const rows = await sql`
       INSERT INTO "User" (
-        "id", "fullName", "username", "passwordHash", "expiresAt",
+        "id", "fullName", "username", "passwordHash", "password", "expiresAt",
         "maxConnections", "allowedIps", "upstreamId", "upstreamUsername", "upstreamPassword"
       )
       VALUES (
-        ${crypto.randomUUID()}, ${data.fullName}, ${data.username}, ${data.passwordHash}, ${data.expiresAt},
+        ${crypto.randomUUID()}, ${data.fullName}, ${data.username}, ${data.passwordHash}, ${data.password}, ${data.expiresAt},
         ${data.maxConnections}, ${toPostgresTextArray(data.allowedIps)}::text[], ${data.upstreamId}, ${data.upstreamUsername}, ${data.upstreamPassword}
       )
       RETURNING *
@@ -103,6 +104,7 @@ export class UserRepository {
     if (data.fullName !== undefined) push("fullName", data.fullName);
     if (data.username !== undefined) push("username", data.username);
     if (data.passwordHash !== undefined) push("passwordHash", data.passwordHash);
+    if (data.password !== undefined) push("password", data.password);
     if (data.status !== undefined) push("status", data.status);
     if (data.expiresAt !== undefined) push("expiresAt", data.expiresAt);
     if (data.maxConnections !== undefined) push("maxConnections", data.maxConnections);

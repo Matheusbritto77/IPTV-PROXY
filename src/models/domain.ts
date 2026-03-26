@@ -32,6 +32,7 @@ export type User = {
   fullName: string;
   username: string;
   passwordHash: string;
+  password: string;
   status: UserStatus;
   expiresAt: Date;
   maxConnections: number;
@@ -52,6 +53,7 @@ export type UserUpdateInput = {
   fullName?: string;
   username?: string;
   passwordHash?: string;
+  password?: string;
   status?: UserStatus;
   expiresAt?: Date;
   maxConnections?: number;
