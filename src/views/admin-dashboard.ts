@@ -314,9 +314,59 @@ export function renderAdminDashboard(input: DashboardInput) {
       100% { transform: scale(1); opacity: 1; }
     }
 
-    /* Chart styles */
-    .chart-container { height: 300px; margin-top: 24px; }
-  </style>
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .modal {
+      background: var(--card);
+      border-radius: var(--radius);
+      width: 90%;
+      max-width: 500px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      position: relative;
+      animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(30px) scale(0.95); opacity: 0; }
+      to { transform: translateY(0) scale(1); opacity: 1; }
+    }
+
+    .modal h2 { margin-top: 0; font-size: 24px; margin-bottom: 24px; text-align: center; }
+    
+    .credential-card {
+      background: #f5f5f7;
+      border-radius: 12px;
+      padding: 16px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      margin-bottom: 24px;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .modal-actions .btn { flex: 1; }
 </head>
 <body>
 
@@ -497,6 +547,17 @@ export function renderAdminDashboard(input: DashboardInput) {
     </div>
 
   </main>
+  
+  <div id="credentials-modal" class="modal-overlay">
+    <div class="modal">
+      <h2>Acesso Criado</h2>
+      <div id="credentials-content" class="credential-card"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="copyCredentials()">Copiar Credenciais</button>
+        <button class="btn ghost" onclick="closeModal()">Fechar</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const adminToken = ${JSON.stringify(input.adminToken)};
@@ -597,16 +658,52 @@ export function renderAdminDashboard(input: DashboardInput) {
     async function createUser(event) {
       event.preventDefault();
       const form = new FormData(event.target);
-      await submitJson("/admin/users", "POST", {
-        fullName: form.get("fullName"),
-        username: form.get("username"),
-        password: form.get("password"),
-        expiresAt: new Date(form.get("expiresAt")).toISOString(),
-        maxConnections: Number(form.get("maxConnections")),
-        upstreamId: defaultUpstreamId,
-        upstreamUsername: defaultUpstreamUsername,
-        upstreamPassword: defaultUpstreamPassword
-      });
+      const res = await (await fetch("/admin/users", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-admin-token": adminToken
+        },
+        body: JSON.stringify({
+          fullName: form.get("fullName"),
+          username: form.get("username"),
+          password: form.get("password"),
+          expiresAt: new Date(form.get("expiresAt")).toISOString(),
+          maxConnections: Number(form.get("maxConnections")),
+          upstreamId: defaultUpstreamId,
+          upstreamUsername: defaultUpstreamUsername,
+          upstreamPassword: defaultUpstreamPassword
+        })
+      }));
+
+      if (!res.ok) {
+        const text = await res.text();
+        alert("Falha: " + text);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.textCard) {
+        showModal(data.textCard);
+      } else {
+        window.location.reload();
+      }
+    }
+
+    function showModal(content) {
+      document.getElementById('credentials-content').innerText = content;
+      document.getElementById('credentials-modal').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('credentials-modal').style.display = 'none';
+      window.location.reload();
+    }
+
+    async function copyCredentials() {
+      const text = document.getElementById('credentials-content').innerText;
+      await navigator.clipboard.writeText(text);
+      alert("Copiado para a área de transferência!");
     }
 
     async function renewUser(id) {
