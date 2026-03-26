@@ -367,6 +367,7 @@ export function renderAdminDashboard(input: DashboardInput) {
     }
 
     .modal-actions .btn { flex: 1; }
+  </style>
 </head>
 <body>
 
