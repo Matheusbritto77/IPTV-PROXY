@@ -547,6 +547,14 @@ type Subscriber struct {
 	pendingPos  int
 	closed      bool
 	writeSlice  int
+	dropCount   int
+	dropBytes   int64
+	lastDropLog time.Time
+}
+
+type DropSummary struct {
+	Count int
+	Bytes int64
 }
 
 type trackedResponseWriter struct {
@@ -801,13 +809,16 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 		}
 
 		if droppedBytes, dropped := subscriber.offerLatestChunk(chunk); dropped {
-			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
-				"key":          worker.streamCtx.Key,
-				"streamId":     worker.streamCtx.StreamID,
-				"subscriberId": subscriber.id,
-				"droppedBytes": droppedBytes,
-				"dropReason":   "subscriber_replaced_stale_pending",
-			})
+			if summary := subscriber.recordDrop(droppedBytes, time.Now()); summary != nil {
+				worker.app.log("info", "live_channel_subscriber_drops_summary", map[string]any{
+					"key":          worker.streamCtx.Key,
+					"streamId":     worker.streamCtx.StreamID,
+					"subscriberId": subscriber.id,
+					"droppedBytes": summary.Bytes,
+					"droppedCount": summary.Count,
+					"dropReason":   "subscriber_replaced_stale_pending",
+				})
+			}
 		}
 	}
 	worker.mu.Unlock()
@@ -822,6 +833,17 @@ func (worker *LiveChannelWorker) removeSubscriber(subscriberID string) {
 	}
 
 	delete(worker.subscribers, subscriberID)
+	if summary := subscriber.flushDropSummary(); summary != nil {
+		worker.app.log("info", "live_channel_subscriber_drops_summary", map[string]any{
+			"key":          worker.streamCtx.Key,
+			"streamId":     worker.streamCtx.StreamID,
+			"subscriberId": subscriber.id,
+			"droppedBytes": summary.Bytes,
+			"droppedCount": summary.Count,
+			"dropReason":   "subscriber_replaced_stale_pending",
+			"final":        true,
+		})
+	}
 	subscriber.close()
 	subscriber.doneOnce.Do(func() {
 		close(subscriber.done)
@@ -1127,6 +1149,53 @@ func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Durat
 	}
 
 	subscriber.writeSlice = current
+}
+
+func (subscriber *Subscriber) recordDrop(droppedBytes int, now time.Time) *DropSummary {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.closed || droppedBytes <= 0 {
+		return nil
+	}
+
+	subscriber.dropCount++
+	subscriber.dropBytes += int64(droppedBytes)
+	if subscriber.lastDropLog.IsZero() {
+		subscriber.lastDropLog = now
+		return nil
+	}
+
+	if now.Sub(subscriber.lastDropLog) < 2*time.Second {
+		return nil
+	}
+
+	summary := &DropSummary{
+		Count: subscriber.dropCount,
+		Bytes: subscriber.dropBytes,
+	}
+	subscriber.dropCount = 0
+	subscriber.dropBytes = 0
+	subscriber.lastDropLog = now
+	return summary
+}
+
+func (subscriber *Subscriber) flushDropSummary() *DropSummary {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.dropCount == 0 || subscriber.dropBytes == 0 {
+		return nil
+	}
+
+	summary := &DropSummary{
+		Count: subscriber.dropCount,
+		Bytes: subscriber.dropBytes,
+	}
+	subscriber.dropCount = 0
+	subscriber.dropBytes = 0
+	subscriber.lastDropLog = time.Time{}
+	return summary
 }
 
 func copyPassthroughHeaders(target http.Header, source http.Header) {
