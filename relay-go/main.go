@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+var errClientDisconnected = errors.New("client_disconnected")
+
 type Config struct {
 	Port                     int
 	AppUpstreamOrigin        string
@@ -183,48 +185,80 @@ func (app *RelayApp) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
+	responseWriter := &trackedResponseWriter{ResponseWriter: w}
+
 	if r.Header.Get("x-edge-secret") != app.config.EdgeSharedSecret {
-		writeJSONError(w, http.StatusUnauthorized, "unauthorized_edge")
+		writeJSONError(responseWriter, http.StatusUnauthorized, "unauthorized_edge")
 		return
 	}
 
 	streamType, err := requiredHeader(r, "x-stream-type")
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "missing_edge_header")
+		writeJSONError(responseWriter, http.StatusBadRequest, "missing_edge_header")
 		return
 	}
 
 	streamID, err := requiredHeader(r, "x-stream-id")
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "missing_edge_header")
+		writeJSONError(responseWriter, http.StatusBadRequest, "missing_edge_header")
 		return
 	}
 
 	extension, err := requiredHeader(r, "x-stream-extension")
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "missing_edge_header")
+		writeJSONError(responseWriter, http.StatusBadRequest, "missing_edge_header")
 		return
 	}
 
 	ctx, statusCode, err := app.fetchStreamContext(r.Context(), r)
 	if err != nil {
-		writeJSONError(w, statusCode, err.Error())
+		writeJSONError(responseWriter, statusCode, err.Error())
 		return
 	}
 
-	if streamType == string(StreamTypeLive) && r.Header.Get("Range") == "" {
-		if err := app.registry.Subscribe(ctx, w, r); err != nil {
+	if streamType == string(StreamTypeLive) {
+		if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
+			app.log("info", "live_range_header_ignored_for_worker", map[string]any{
+				"key":       ctx.Key,
+				"streamId":  streamID,
+				"extension": extension,
+				"range":     rangeHeader,
+				"ifRange":   r.Header.Get("If-Range"),
+			})
+		}
+
+		if err := app.registry.Subscribe(ctx, responseWriter, r); err != nil {
+			if errors.Is(err, errClientDisconnected) || errors.Is(r.Context().Err(), context.Canceled) {
+				app.log("info", "live_channel_client_disconnected", map[string]any{
+					"key":      ctx.Key,
+					"streamId": streamID,
+				})
+				return
+			}
+
 			app.log("error", "live_channel_subscribe_failed", map[string]any{
 				"key":      ctx.Key,
 				"streamId": streamID,
 				"error":    err.Error(),
 			})
-			writeJSONError(w, http.StatusBadGateway, "upstream_stream_failed")
+			if !responseWriter.wroteHeader {
+				writeJSONError(responseWriter, http.StatusBadGateway, "upstream_stream_failed")
+			}
 		}
 		return
 	}
 
-	if err := app.proxyOneShot(r.Context(), ctx, w, r); err != nil {
+	if err := app.proxyOneShot(r.Context(), ctx, responseWriter, r); err != nil {
+		if errors.Is(err, errClientDisconnected) || errors.Is(r.Context().Err(), context.Canceled) {
+			app.log("info", "stream_proxy_client_disconnected", map[string]any{
+				"key":        ctx.Key,
+				"streamId":   streamID,
+				"streamType": streamType,
+				"extension":  extension,
+			})
+			return
+		}
+
 		app.log("error", "stream_proxy_failed", map[string]any{
 			"key":        ctx.Key,
 			"streamId":   streamID,
@@ -232,7 +266,9 @@ func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
 			"extension":  extension,
 			"error":      err.Error(),
 		})
-		writeJSONError(w, http.StatusBadGateway, "upstream_stream_failed")
+		if !responseWriter.wroteHeader {
+			writeJSONError(responseWriter, http.StatusBadGateway, "upstream_stream_failed")
+		}
 	}
 }
 
@@ -308,6 +344,13 @@ func (app *RelayApp) proxyOneShot(ctx context.Context, streamContext StreamConte
 		}
 
 		_, copyErr := io.CopyBuffer(w, response.Body, make([]byte, 64*1024))
+		if copyErr != nil {
+			if errors.Is(copyErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				return errClientDisconnected
+			}
+			return copyErr
+		}
+
 		app.log("info", "stream_proxy_completed", map[string]any{
 			"key":        streamContext.Key,
 			"streamId":   streamContext.StreamID,
@@ -316,7 +359,7 @@ func (app *RelayApp) proxyOneShot(ctx context.Context, streamContext StreamConte
 			"status":     response.StatusCode,
 			"ttfbMs":     time.Since(startedAt).Milliseconds(),
 		})
-		return copyErr
+		return nil
 	}
 
 	if lastStatus == 0 {
@@ -500,6 +543,27 @@ type Subscriber struct {
 	pendingBytes atomic.Int64
 	connectedAt  time.Time
 	initialized  bool
+}
+
+type trackedResponseWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (writer *trackedResponseWriter) WriteHeader(statusCode int) {
+	writer.wroteHeader = true
+	writer.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (writer *trackedResponseWriter) Write(payload []byte) (int, error) {
+	writer.wroteHeader = true
+	return writer.ResponseWriter.Write(payload)
+}
+
+func (writer *trackedResponseWriter) Flush() {
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func NewLiveChannelWorker(app *RelayApp, streamContext StreamContext, onTerminated func(string)) *LiveChannelWorker {
@@ -987,6 +1051,9 @@ func requiredHeader(r *http.Request, name string) (string, error) {
 }
 
 func writeJSONError(w http.ResponseWriter, status int, code string) {
+	if tracked, ok := w.(*trackedResponseWriter); ok && tracked.wroteHeader {
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
