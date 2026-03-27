@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -532,17 +531,16 @@ type LiveChannelWorker struct {
 }
 
 type Subscriber struct {
-	id           string
-	writer       http.ResponseWriter
-	flusher      http.Flusher
-	send         chan []byte
-	done         chan struct{}
-	sendOnce     sync.Once
-	doneOnce     sync.Once
-	requestCtx   context.Context
-	pendingBytes atomic.Int64
-	connectedAt  time.Time
-	initialized  bool
+	id          string
+	writer      http.ResponseWriter
+	flusher     http.Flusher
+	send        chan []byte
+	done        chan struct{}
+	sendOnce    sync.Once
+	doneOnce    sync.Once
+	requestCtx  context.Context
+	connectedAt time.Time
+	initialized bool
 }
 
 type trackedResponseWriter struct {
@@ -588,7 +586,7 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		id:          newID(),
 		writer:      w,
 		flusher:     flusher,
-		send:        make(chan []byte, 16),
+		send:        make(chan []byte, 1),
 		done:        make(chan struct{}),
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
@@ -695,17 +693,15 @@ func (worker *LiveChannelWorker) initializeSubscriber(subscriber *Subscriber) {
 		return
 	}
 
-	snapshot := make([][]byte, len(worker.ringBuffer))
-	copy(snapshot, worker.ringBuffer)
 	status := worker.upstreamStatus
 	headers := worker.upstreamHeaders.Clone()
 	subscriber.initialized = true
 	worker.mu.Unlock()
 
-	go worker.runSubscriber(subscriber, status, headers, snapshot)
+	go worker.runSubscriber(subscriber, status, headers)
 }
 
-func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status int, headers http.Header, initial [][]byte) {
+func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status int, headers http.Header) {
 	defer subscriber.doneOnce.Do(func() {
 		close(subscriber.done)
 	})
@@ -713,13 +709,6 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 	copyPassthroughHeaders(subscriber.writer.Header(), headers)
 	subscriber.writer.WriteHeader(status)
 	subscriber.flusher.Flush()
-
-	for _, chunk := range initial {
-		if err := writeChunk(subscriber.writer, subscriber.flusher, chunk); err != nil {
-			worker.removeSubscriber(subscriber.id)
-			return
-		}
-	}
 
 	for {
 		select {
@@ -735,7 +724,6 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 				worker.removeSubscriber(subscriber.id)
 				return
 			}
-			subscriber.pendingBytes.Add(-int64(len(chunk)))
 		}
 	}
 }
@@ -769,7 +757,6 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 		return
 	}
 
-	worker.appendToRingBufferLocked(chunk)
 	worker.bytesBroadcast += int64(len(chunk))
 	worker.chunksBroadcast++
 
@@ -778,31 +765,15 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 			continue
 		}
 
-		pending := subscriber.pendingBytes.Add(int64(len(chunk)))
-		if pending > worker.app.config.MaxSubscriberBufferBytes {
-			subscriber.pendingBytes.Add(-int64(len(chunk)))
-			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
-				"key":          worker.streamCtx.Key,
-				"streamId":     worker.streamCtx.StreamID,
-				"subscriberId": subscriber.id,
-				"pendingBytes": pending - int64(len(chunk)),
-				"droppedBytes": len(chunk),
-				"dropReason":   "buffer_limit",
-			})
-			continue
-		}
-
 		select {
 		case subscriber.send <- chunk:
 		default:
-			subscriber.pendingBytes.Add(-int64(len(chunk)))
 			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
 				"key":          worker.streamCtx.Key,
 				"streamId":     worker.streamCtx.StreamID,
 				"subscriberId": subscriber.id,
-				"pendingBytes": subscriber.pendingBytes.Load(),
 				"droppedBytes": len(chunk),
-				"dropReason":   "queue_full",
+				"dropReason":   "subscriber_not_ready",
 			})
 		}
 	}
