@@ -164,7 +164,7 @@ func loadConfig() Config {
 		UpstreamTimeout:          time.Duration(intEnv("UPSTREAM_TIMEOUT_MS", 8000)) * time.Millisecond,
 		DrainTTL:                 time.Duration(intEnv("LIVE_CHANNEL_DRAIN_TTL_MS", 15000)) * time.Millisecond,
 		ReconnectDelay:           time.Duration(intEnv("LIVE_CHANNEL_RECONNECT_DELAY_MS", 1000)) * time.Millisecond,
-		LiveReadChunkBytes:       intEnv("LIVE_CHANNEL_READ_CHUNK_BYTES", 2048),
+		LiveReadChunkBytes:       intEnv("LIVE_CHANNEL_READ_CHUNK_BYTES", 1024),
 		RingBufferChunks:         intEnv("LIVE_CHANNEL_RING_BUFFER_CHUNKS", 32),
 		RingBufferBytes:          intEnv("LIVE_CHANNEL_RING_BUFFER_BYTES", 262144),
 		MaxSubscriberBufferBytes: int64(intEnv("LIVE_CHANNEL_MAX_SUBSCRIBER_BUFFER_BYTES", 524288)),
@@ -597,7 +597,7 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
 		notify:      make(chan struct{}, 1),
-		writeSlice:  2048,
+		writeSlice:  1024,
 	}
 
 	worker.mu.Lock()
@@ -758,7 +758,7 @@ func (worker *LiveChannelWorker) readLoop(body io.ReadCloser) {
 
 	chunkSize := worker.app.config.LiveReadChunkBytes
 	if chunkSize <= 0 {
-		chunkSize = 2 * 1024
+		chunkSize = 1024
 	}
 
 	buffer := make([]byte, chunkSize)
@@ -782,7 +782,7 @@ func (worker *LiveChannelWorker) readLoop(body io.ReadCloser) {
 func (worker *LiveChannelWorker) broadcastBuffer(buffer []byte, preferredChunkSize int) {
 	chunkSize := preferredChunkSize
 	if chunkSize <= 0 {
-		chunkSize = 2 * 1024
+		chunkSize = 1024
 	}
 
 	for start := 0; start < len(buffer); start += chunkSize {
@@ -1116,41 +1116,43 @@ func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Durat
 
 	current := subscriber.writeSlice
 	if current <= 0 {
-		current = 2048
+		current = 1024
 	}
 
 	paceDelay := subscriber.paceDelay
 
 	switch {
-	case duration >= 60*time.Millisecond:
+	case duration >= 80*time.Millisecond:
 		current /= 2
-		paceDelay += 6 * time.Millisecond
-	case duration >= 35*time.Millisecond:
+		paceDelay += 12 * time.Millisecond
+	case duration >= 50*time.Millisecond:
 		current -= 512
+		paceDelay += 8 * time.Millisecond
+	case duration >= 25*time.Millisecond:
+		current -= 256
 		paceDelay += 4 * time.Millisecond
 	case duration >= 20*time.Millisecond:
-		current -= 256
 		paceDelay += 2 * time.Millisecond
-	case duration <= 3*time.Millisecond:
-		current += 1024
-		paceDelay -= 2 * time.Millisecond
-	case duration <= 6*time.Millisecond:
+	case duration <= 2*time.Millisecond:
 		current += 512
+		paceDelay -= 2 * time.Millisecond
+	case duration <= 5*time.Millisecond:
+		current += 256
 		paceDelay -= 1 * time.Millisecond
 	}
 
-	if current < 512 {
-		current = 512
+	if current < 256 {
+		current = 256
 	}
-	if current > 4096 {
-		current = 4096
+	if current > 2048 {
+		current = 2048
 	}
 
 	if paceDelay < 0 {
 		paceDelay = 0
 	}
-	if paceDelay > 12*time.Millisecond {
-		paceDelay = 12 * time.Millisecond
+	if paceDelay > 20*time.Millisecond {
+		paceDelay = 20 * time.Millisecond
 	}
 
 	subscriber.writeSlice = current
