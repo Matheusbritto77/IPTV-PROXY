@@ -74,54 +74,31 @@ services:
       start_period: 40s
 
   stream-relay:
-    image: p2p-gateway:latest
+    image: p2p-stream-relay:latest
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.relay
     container_name: p2p-stream-relay
     restart: unless-stopped
-    command: ["bun", "run", "start:relay"]
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      PORT: 8080
       APP_BASE_URL: ${APP_BASE_URL:-https://renttool.store}
       APP_UPSTREAM_ORIGIN: ${APP_UPSTREAM_ORIGIN:-http://app:8080}
-      STREAM_RELAY_ORIGIN: ${STREAM_RELAY_ORIGIN:-http://stream-relay:8081}
-      APP_NAME: ${APP_NAME:-P2P Gateway}
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/p2p_gateway
-      REDIS_URL: redis://redis:6379
-      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-300}
-      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-30}
-      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-120}
       UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-8000}
-      STREAM_MODE: ${STREAM_MODE:-proxy}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-change-me-admin-token}
       EDGE_SHARED_SECRET: ${EDGE_SHARED_SECRET:-change-me-edge-secret}
-      OPENRESTY_PORT: ${OPENRESTY_PORT:-8090}
       STREAM_RELAY_PORT: ${STREAM_RELAY_PORT:-8081}
-      BOOTSTRAP_ENABLED: "false"
-      BOOTSTRAP_UPSTREAM_NAME: ${BOOTSTRAP_UPSTREAM_NAME:-}
-      BOOTSTRAP_UPSTREAM_SMARTERS_URL: ${BOOTSTRAP_UPSTREAM_SMARTERS_URL:-}
-      BOOTSTRAP_UPSTREAM_XCIPTV_DNS: ${BOOTSTRAP_UPSTREAM_XCIPTV_DNS:-}
-      BOOTSTRAP_UPSTREAM_USERNAME: ${BOOTSTRAP_UPSTREAM_USERNAME:-}
-      BOOTSTRAP_UPSTREAM_PASSWORD: ${BOOTSTRAP_UPSTREAM_PASSWORD:-}
+      LIVE_CHANNEL_DRAIN_TTL_MS: ${LIVE_CHANNEL_DRAIN_TTL_MS:-15000}
+      LIVE_CHANNEL_RECONNECT_DELAY_MS: ${LIVE_CHANNEL_RECONNECT_DELAY_MS:-1000}
+      LIVE_CHANNEL_RING_BUFFER_CHUNKS: ${LIVE_CHANNEL_RING_BUFFER_CHUNKS:-32}
+      LIVE_CHANNEL_RING_BUFFER_BYTES: ${LIVE_CHANNEL_RING_BUFFER_BYTES:-262144}
+      LIVE_CHANNEL_MAX_SUBSCRIBER_BUFFER_BYTES: ${LIVE_CHANNEL_MAX_SUBSCRIBER_BUFFER_BYTES:-524288}
     expose:
       - "8081"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      app:
+        condition: service_started
     healthcheck:
-      test:
-        [
-          "CMD",
-          "bun",
-          "-e",
-          "const response = await fetch('http://127.0.0.1:8081/healthz'); if (!response.ok) process.exit(1);",
-        ]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -156,7 +156,7 @@ export class XtreamUpstreamAdapter {
     return this.buildStreamUrls(credentials, streamType, streamId, extension)[0];
   }
 
-  private buildStreamUrls(
+  buildStreamUrls(
     credentials: UpstreamCredentials,
     streamType: "live" | "movie" | "series",
     streamId: string,

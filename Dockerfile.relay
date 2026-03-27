@@ -1,0 +1,19 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+COPY relay-go/go.mod ./relay-go/go.mod
+COPY relay-go/main.go ./relay-go/main.go
+
+WORKDIR /app/relay-go
+RUN go build -o /out/stream-relay .
+
+FROM alpine:3.20
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates wget
+
+COPY --from=builder /out/stream-relay /usr/local/bin/stream-relay
+
+CMD ["/usr/local/bin/stream-relay"]

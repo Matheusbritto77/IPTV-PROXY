@@ -9,3 +9,6 @@ internalRouter.use(edgeSharedSecret);
 internalRouter.get("/edge/authorize-stream", (req, res, next) =>
   edgeController.authorizeStream(req, res).catch(next),
 );
+internalRouter.get("/edge/stream-context", (req, res, next) =>
+  edgeController.getStreamContext(req, res).catch(next),
+);

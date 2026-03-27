@@ -232,6 +232,27 @@ export class UpstreamGatewayService {
     const baseUrl = this.distinctBaseUrls(credentials.streamBaseUrl, credentials.playlistBaseUrl)[0];
     return xtreamUpstreamAdapter.buildStreamUrl({ ...credentials, baseUrl } as any, streamType, streamId, extension);
   }
+
+  async buildStreamUrls(
+    user: UserWithUpstream,
+    streamType: "live" | "movie" | "series",
+    streamId: string,
+    extension: string,
+  ) {
+    const credentials = await this.resolveCredentials(user);
+    const baseUrls = this.distinctBaseUrls(credentials.streamBaseUrl, credentials.playlistBaseUrl);
+
+    return [...new Set(
+      baseUrls.flatMap((baseUrl) =>
+        xtreamUpstreamAdapter.buildStreamUrls(
+          { ...credentials, baseUrl } as any,
+          streamType,
+          streamId,
+          extension,
+        ),
+      ),
+    )];
+  }
 }
 
 export const upstreamGatewayService = new UpstreamGatewayService();
