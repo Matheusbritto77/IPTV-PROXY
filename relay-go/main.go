@@ -586,7 +586,7 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		id:          newID(),
 		writer:      w,
 		flusher:     flusher,
-		send:        make(chan []byte, 4),
+		send:        make(chan []byte, 1),
 		done:        make(chan struct{}),
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
