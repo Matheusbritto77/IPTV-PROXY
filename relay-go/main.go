@@ -534,13 +534,15 @@ type Subscriber struct {
 	id          string
 	writer      http.ResponseWriter
 	flusher     http.Flusher
-	send        chan []byte
 	done        chan struct{}
-	sendOnce    sync.Once
 	doneOnce    sync.Once
 	requestCtx  context.Context
 	connectedAt time.Time
 	initialized bool
+	notify      chan struct{}
+	mu          sync.Mutex
+	pending     []byte
+	closed      bool
 }
 
 type trackedResponseWriter struct {
@@ -586,10 +588,10 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		id:          newID(),
 		writer:      w,
 		flusher:     flusher,
-		send:        make(chan []byte, 1),
 		done:        make(chan struct{}),
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
+		notify:      make(chan struct{}, 1),
 	}
 
 	worker.mu.Lock()
@@ -712,14 +714,16 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 
 	for {
 		select {
+		case <-subscriber.done:
+			return
 		case <-subscriber.requestCtx.Done():
 			worker.removeSubscriber(subscriber.id)
 			return
-		case chunk, ok := <-subscriber.send:
+		case <-subscriber.notify:
+			chunk, ok := subscriber.takePendingChunk()
 			if !ok {
-				return
+				continue
 			}
-
 			if err := writeChunk(subscriber.writer, subscriber.flusher, chunk); err != nil {
 				worker.removeSubscriber(subscriber.id)
 				return
@@ -765,15 +769,13 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 			continue
 		}
 
-		select {
-		case subscriber.send <- chunk:
-		default:
+		if droppedBytes, dropped := subscriber.offerLatestChunk(chunk); dropped {
 			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
 				"key":          worker.streamCtx.Key,
 				"streamId":     worker.streamCtx.StreamID,
 				"subscriberId": subscriber.id,
-				"droppedBytes": len(chunk),
-				"dropReason":   "subscriber_not_ready",
+				"droppedBytes": droppedBytes,
+				"dropReason":   "subscriber_replaced_stale_pending",
 			})
 		}
 	}
@@ -789,9 +791,7 @@ func (worker *LiveChannelWorker) removeSubscriber(subscriberID string) {
 	}
 
 	delete(worker.subscribers, subscriberID)
-	subscriber.sendOnce.Do(func() {
-		close(subscriber.send)
-	})
+	subscriber.close()
 	subscriber.doneOnce.Do(func() {
 		close(subscriber.done)
 	})
@@ -948,9 +948,7 @@ func (worker *LiveChannelWorker) Shutdown(reason string) {
 		_ = body.Close()
 	}
 	for _, subscriber := range subscribers {
-		subscriber.sendOnce.Do(func() {
-			close(subscriber.send)
-		})
+		subscriber.close()
 		subscriber.doneOnce.Do(func() {
 			close(subscriber.done)
 		})
@@ -1004,6 +1002,46 @@ func (worker *LiveChannelWorker) subscriberCount() int {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	return len(worker.subscribers)
+}
+
+func (subscriber *Subscriber) offerLatestChunk(chunk []byte) (int, bool) {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.closed {
+		return 0, false
+	}
+
+	droppedBytes := len(subscriber.pending)
+	dropped := droppedBytes > 0
+	subscriber.pending = chunk
+
+	select {
+	case subscriber.notify <- struct{}{}:
+	default:
+	}
+
+	return droppedBytes, dropped
+}
+
+func (subscriber *Subscriber) takePendingChunk() ([]byte, bool) {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.closed || len(subscriber.pending) == 0 {
+		return nil, false
+	}
+
+	chunk := subscriber.pending
+	subscriber.pending = nil
+	return chunk, true
+}
+
+func (subscriber *Subscriber) close() {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+	subscriber.closed = true
+	subscriber.pending = nil
 }
 
 func copyPassthroughHeaders(target http.Header, source http.Header) {
