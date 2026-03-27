@@ -895,7 +895,10 @@ func (worker *LiveChannelWorker) handleUpstreamTermination(reason string, err er
 	}
 
 	subscribers := len(worker.subscribers)
-	worker.scheduleReconnectLocked()
+	shouldReconnect := reason != "upstream_end"
+	if shouldReconnect {
+		worker.scheduleReconnectLocked()
+	}
 	if subscribers == 0 {
 		worker.scheduleDrainLocked()
 	}
@@ -908,6 +911,10 @@ func (worker *LiveChannelWorker) handleUpstreamTermination(reason string, err er
 		"error":       errorString(err),
 		"subscribers": subscribers,
 	})
+
+	if !shouldReconnect {
+		worker.Shutdown("upstream_end")
+	}
 }
 
 func (worker *LiveChannelWorker) Shutdown(reason string) {
