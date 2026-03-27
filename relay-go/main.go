@@ -215,7 +215,7 @@ func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if streamType == string(StreamTypeLive) {
+	if streamType == string(StreamTypeLive) && !isHLSExtension(extension) {
 		if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
 			app.log("info", "live_range_header_ignored_for_worker", map[string]any{
 				"key":       ctx.Key,
@@ -245,6 +245,14 @@ func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		return
+	}
+
+	if streamType == string(StreamTypeLive) && isHLSExtension(extension) {
+		app.log("info", "live_hls_bypassing_channel_worker", map[string]any{
+			"key":       ctx.Key,
+			"streamId":  streamID,
+			"extension": extension,
+		})
 	}
 
 	if err := app.proxyOneShot(r.Context(), ctx, responseWriter, r); err != nil {
@@ -1022,6 +1030,10 @@ func requiredHeader(r *http.Request, name string) (string, error) {
 		return "", fmt.Errorf("missing_%s", name)
 	}
 	return value, nil
+}
+
+func isHLSExtension(extension string) bool {
+	return strings.EqualFold(strings.TrimSpace(extension), "m3u8")
 }
 
 func writeJSONError(w http.ResponseWriter, status int, code string) {
