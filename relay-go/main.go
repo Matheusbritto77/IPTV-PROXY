@@ -27,6 +27,7 @@ type Config struct {
 	UpstreamTimeout          time.Duration
 	DrainTTL                 time.Duration
 	ReconnectDelay           time.Duration
+	LiveReadChunkBytes       int
 	RingBufferChunks         int
 	RingBufferBytes          int
 	MaxSubscriberBufferBytes int64
@@ -163,6 +164,7 @@ func loadConfig() Config {
 		UpstreamTimeout:          time.Duration(intEnv("UPSTREAM_TIMEOUT_MS", 8000)) * time.Millisecond,
 		DrainTTL:                 time.Duration(intEnv("LIVE_CHANNEL_DRAIN_TTL_MS", 15000)) * time.Millisecond,
 		ReconnectDelay:           time.Duration(intEnv("LIVE_CHANNEL_RECONNECT_DELAY_MS", 1000)) * time.Millisecond,
+		LiveReadChunkBytes:       intEnv("LIVE_CHANNEL_READ_CHUNK_BYTES", 8192),
 		RingBufferChunks:         intEnv("LIVE_CHANNEL_RING_BUFFER_CHUNKS", 32),
 		RingBufferBytes:          intEnv("LIVE_CHANNEL_RING_BUFFER_BYTES", 262144),
 		MaxSubscriberBufferBytes: int64(intEnv("LIVE_CHANNEL_MAX_SUBSCRIBER_BUFFER_BYTES", 524288)),
@@ -735,7 +737,12 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 func (worker *LiveChannelWorker) readLoop(body io.ReadCloser) {
 	defer body.Close()
 
-	buffer := make([]byte, 64*1024)
+	chunkSize := worker.app.config.LiveReadChunkBytes
+	if chunkSize <= 0 {
+		chunkSize = 8 * 1024
+	}
+
+	buffer := make([]byte, chunkSize)
 	for {
 		n, err := body.Read(buffer)
 		if n > 0 {
