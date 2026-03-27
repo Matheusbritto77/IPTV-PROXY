@@ -56,6 +56,7 @@ type RelayApp struct {
 	appClient      *http.Client
 	upstreamClient *http.Client
 	registry       *LiveChannelRegistry
+	viewers        *LiveViewerTracker
 }
 
 type RelayMetrics struct {
@@ -118,6 +119,7 @@ func main() {
 		upstreamClient: upstreamClient,
 	}
 	app.registry = NewLiveChannelRegistry(app)
+	app.viewers = NewLiveViewerTracker()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", app.handleHealthz)
@@ -226,6 +228,43 @@ func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
 				"range":     rangeHeader,
 				"ifRange":   r.Header.Get("If-Range"),
 			})
+		}
+
+		if !app.registry.HasWorker(ctx.Key) {
+			activeViewers, release := app.viewers.Acquire(ctx.Key)
+			defer release()
+
+			if activeViewers <= 1 {
+				app.log("info", "live_direct_passthrough", map[string]any{
+					"key":           ctx.Key,
+					"streamId":      streamID,
+					"activeViewers": activeViewers,
+				})
+
+				if err := app.proxyOneShot(r.Context(), ctx, responseWriter, r); err != nil {
+					if errors.Is(err, errClientDisconnected) || errors.Is(r.Context().Err(), context.Canceled) {
+						app.log("info", "stream_proxy_client_disconnected", map[string]any{
+							"key":        ctx.Key,
+							"streamId":   streamID,
+							"streamType": streamType,
+							"extension":  extension,
+						})
+						return
+					}
+
+					app.log("error", "stream_proxy_failed", map[string]any{
+						"key":        ctx.Key,
+						"streamId":   streamID,
+						"streamType": streamType,
+						"extension":  extension,
+						"error":      err.Error(),
+					})
+					if !responseWriter.wroteHeader {
+						writeJSONError(responseWriter, http.StatusBadGateway, "upstream_stream_failed")
+					}
+				}
+				return
+			}
 		}
 
 		if err := app.registry.Subscribe(ctx, responseWriter, r); err != nil {
@@ -446,10 +485,48 @@ type LiveChannelRegistry struct {
 	workers map[string]*LiveChannelWorker
 }
 
+type LiveViewerTracker struct {
+	mu     sync.Mutex
+	counts map[string]int
+}
+
 func NewLiveChannelRegistry(app *RelayApp) *LiveChannelRegistry {
 	return &LiveChannelRegistry{
 		app:     app,
 		workers: make(map[string]*LiveChannelWorker),
+	}
+}
+
+func NewLiveViewerTracker() *LiveViewerTracker {
+	return &LiveViewerTracker{
+		counts: make(map[string]int),
+	}
+}
+
+func (registry *LiveChannelRegistry) HasWorker(key string) bool {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	_, ok := registry.workers[key]
+	return ok
+}
+
+func (tracker *LiveViewerTracker) Acquire(key string) (int, func()) {
+	tracker.mu.Lock()
+	tracker.counts[key]++
+	current := tracker.counts[key]
+	tracker.mu.Unlock()
+
+	return current, func() {
+		tracker.mu.Lock()
+		defer tracker.mu.Unlock()
+
+		remaining := tracker.counts[key] - 1
+		if remaining <= 0 {
+			delete(tracker.counts, key)
+			return
+		}
+
+		tracker.counts[key] = remaining
 	}
 }
 
