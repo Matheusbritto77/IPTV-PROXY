@@ -167,7 +167,7 @@ export class XtreamUpstreamAdapter {
     ];
 
     if (streamType === "live") {
-      urls.unshift(`${credentials.baseUrl}/${credentials.username}/${credentials.password}/${streamId}`);
+      urls.push(`${credentials.baseUrl}/${credentials.username}/${credentials.password}/${streamId}`);
     }
 
     return urls;

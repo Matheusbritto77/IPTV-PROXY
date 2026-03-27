@@ -58,7 +58,7 @@ export class EdgeController {
     const urlCandidates = await upstreamGatewayService.buildStreamUrls(user, streamType, streamId, extension);
 
     return res.json({
-      key: `${user.upstreamId}:${streamId}:${extension}`,
+      key: streamType === "live" ? `${user.upstreamId}:${streamId}` : `${user.upstreamId}:${streamId}:${extension}`,
       upstreamId: user.upstreamId,
       streamType,
       streamId,
