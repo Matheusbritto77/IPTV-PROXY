@@ -547,7 +547,6 @@ type Subscriber struct {
 	pendingPos  int
 	closed      bool
 	writeSlice  int
-	paceDelay   time.Duration
 }
 
 type trackedResponseWriter struct {
@@ -597,7 +596,7 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
 		notify:      make(chan struct{}, 1),
-		writeSlice:  1024,
+		writeSlice:  512,
 	}
 
 	worker.mu.Lock()
@@ -737,17 +736,7 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 					worker.removeSubscriber(subscriber.id)
 					return
 				}
-				paceDelay := subscriber.observeWrite(len(chunk), time.Since(startedAt))
-				if paceDelay > 0 {
-					select {
-					case <-time.After(paceDelay):
-					case <-subscriber.done:
-						return
-					case <-subscriber.requestCtx.Done():
-						worker.removeSubscriber(subscriber.id)
-						return
-					}
-				}
+				subscriber.observeWrite(len(chunk), time.Since(startedAt))
 			}
 		}
 	}
@@ -1080,7 +1069,7 @@ func (subscriber *Subscriber) takeNextWriteSlice() ([]byte, bool) {
 
 	writeSlice := subscriber.writeSlice
 	if writeSlice <= 0 {
-		writeSlice = 4096
+		writeSlice = 512
 	}
 
 	start := subscriber.pendingPos
@@ -1106,58 +1095,38 @@ func (subscriber *Subscriber) close() {
 	subscriber.pendingPos = 0
 }
 
-func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Duration) time.Duration {
+func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Duration) {
 	subscriber.mu.Lock()
 	defer subscriber.mu.Unlock()
 
 	if subscriber.closed || bytesWritten <= 0 {
-		return 0
+		return
 	}
 
 	current := subscriber.writeSlice
 	if current <= 0 {
-		current = 1024
+		current = 512
 	}
 
-	paceDelay := subscriber.paceDelay
-
 	switch {
-	case duration >= 80*time.Millisecond:
+	case duration >= 60*time.Millisecond:
 		current /= 2
-		paceDelay += 12 * time.Millisecond
-	case duration >= 50*time.Millisecond:
-		current -= 512
-		paceDelay += 8 * time.Millisecond
-	case duration >= 25*time.Millisecond:
-		current -= 256
-		paceDelay += 4 * time.Millisecond
-	case duration >= 20*time.Millisecond:
-		paceDelay += 2 * time.Millisecond
+	case duration >= 30*time.Millisecond:
+		current -= 128
 	case duration <= 2*time.Millisecond:
-		current += 512
-		paceDelay -= 2 * time.Millisecond
-	case duration <= 5*time.Millisecond:
 		current += 256
-		paceDelay -= 1 * time.Millisecond
+	case duration <= 6*time.Millisecond:
+		current += 128
 	}
 
 	if current < 256 {
 		current = 256
 	}
-	if current > 2048 {
-		current = 2048
-	}
-
-	if paceDelay < 0 {
-		paceDelay = 0
-	}
-	if paceDelay > 20*time.Millisecond {
-		paceDelay = 20 * time.Millisecond
+	if current > 1024 {
+		current = 1024
 	}
 
 	subscriber.writeSlice = current
-	subscriber.paceDelay = paceDelay
-	return paceDelay
 }
 
 func copyPassthroughHeaders(target http.Header, source http.Header) {
