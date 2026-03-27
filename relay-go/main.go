@@ -544,7 +544,9 @@ type Subscriber struct {
 	notify      chan struct{}
 	mu          sync.Mutex
 	pending     []byte
+	pendingPos  int
 	closed      bool
+	writeSlice  int
 }
 
 type trackedResponseWriter struct {
@@ -594,6 +596,7 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
 		notify:      make(chan struct{}, 1),
+		writeSlice:  4096,
 	}
 
 	worker.mu.Lock()
@@ -722,13 +725,18 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 			worker.removeSubscriber(subscriber.id)
 			return
 		case <-subscriber.notify:
-			chunk, ok := subscriber.takePendingChunk()
-			if !ok {
-				continue
-			}
-			if err := writeChunk(subscriber.writer, subscriber.flusher, chunk); err != nil {
-				worker.removeSubscriber(subscriber.id)
-				return
+			for {
+				chunk, ok := subscriber.takeNextWriteSlice()
+				if !ok {
+					break
+				}
+
+				startedAt := time.Now()
+				if err := writeChunk(subscriber.writer, subscriber.flusher, chunk); err != nil {
+					worker.removeSubscriber(subscriber.id)
+					return
+				}
+				subscriber.observeWrite(len(chunk), time.Since(startedAt))
 			}
 		}
 	}
@@ -1019,9 +1027,13 @@ func (subscriber *Subscriber) offerLatestChunk(chunk []byte) (int, bool) {
 		return 0, false
 	}
 
-	droppedBytes := len(subscriber.pending)
+	droppedBytes := len(subscriber.pending) - subscriber.pendingPos
+	if droppedBytes < 0 {
+		droppedBytes = 0
+	}
 	dropped := droppedBytes > 0
 	subscriber.pending = chunk
+	subscriber.pendingPos = 0
 
 	select {
 	case subscriber.notify <- struct{}{}:
@@ -1031,16 +1043,31 @@ func (subscriber *Subscriber) offerLatestChunk(chunk []byte) (int, bool) {
 	return droppedBytes, dropped
 }
 
-func (subscriber *Subscriber) takePendingChunk() ([]byte, bool) {
+func (subscriber *Subscriber) takeNextWriteSlice() ([]byte, bool) {
 	subscriber.mu.Lock()
 	defer subscriber.mu.Unlock()
 
-	if subscriber.closed || len(subscriber.pending) == 0 {
+	if subscriber.closed || len(subscriber.pending) == 0 || subscriber.pendingPos >= len(subscriber.pending) {
 		return nil, false
 	}
 
-	chunk := subscriber.pending
-	subscriber.pending = nil
+	writeSlice := subscriber.writeSlice
+	if writeSlice <= 0 {
+		writeSlice = 4096
+	}
+
+	start := subscriber.pendingPos
+	end := start + writeSlice
+	if end > len(subscriber.pending) {
+		end = len(subscriber.pending)
+	}
+
+	chunk := subscriber.pending[start:end]
+	subscriber.pendingPos = end
+	if subscriber.pendingPos >= len(subscriber.pending) {
+		subscriber.pending = nil
+		subscriber.pendingPos = 0
+	}
 	return chunk, true
 }
 
@@ -1049,6 +1076,41 @@ func (subscriber *Subscriber) close() {
 	defer subscriber.mu.Unlock()
 	subscriber.closed = true
 	subscriber.pending = nil
+	subscriber.pendingPos = 0
+}
+
+func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Duration) {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.closed || bytesWritten <= 0 {
+		return
+	}
+
+	current := subscriber.writeSlice
+	if current <= 0 {
+		current = 4096
+	}
+
+	switch {
+	case duration >= 40*time.Millisecond:
+		current /= 2
+	case duration >= 20*time.Millisecond:
+		current -= 1024
+	case duration <= 4*time.Millisecond:
+		current += 1024
+	case duration <= 8*time.Millisecond:
+		current += 512
+	}
+
+	if current < 1024 {
+		current = 1024
+	}
+	if current > 8192 {
+		current = 8192
+	}
+
+	subscriber.writeSlice = current
 }
 
 func copyPassthroughHeaders(target http.Header, source http.Header) {
