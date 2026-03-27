@@ -763,8 +763,6 @@ func (worker *LiveChannelWorker) readLoop(body io.ReadCloser) {
 }
 
 func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
-	var slowSubscribers []string
-
 	worker.mu.Lock()
 	if worker.stopped {
 		worker.mu.Unlock()
@@ -783,7 +781,14 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 		pending := subscriber.pendingBytes.Add(int64(len(chunk)))
 		if pending > worker.app.config.MaxSubscriberBufferBytes {
 			subscriber.pendingBytes.Add(-int64(len(chunk)))
-			slowSubscribers = append(slowSubscribers, subscriber.id)
+			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
+				"key":          worker.streamCtx.Key,
+				"streamId":     worker.streamCtx.StreamID,
+				"subscriberId": subscriber.id,
+				"pendingBytes": pending - int64(len(chunk)),
+				"droppedBytes": len(chunk),
+				"dropReason":   "buffer_limit",
+			})
 			continue
 		}
 
@@ -791,19 +796,17 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 		case subscriber.send <- chunk:
 		default:
 			subscriber.pendingBytes.Add(-int64(len(chunk)))
-			slowSubscribers = append(slowSubscribers, subscriber.id)
+			worker.app.log("info", "live_channel_subscriber_chunk_dropped", map[string]any{
+				"key":          worker.streamCtx.Key,
+				"streamId":     worker.streamCtx.StreamID,
+				"subscriberId": subscriber.id,
+				"pendingBytes": subscriber.pendingBytes.Load(),
+				"droppedBytes": len(chunk),
+				"dropReason":   "queue_full",
+			})
 		}
 	}
 	worker.mu.Unlock()
-
-	for _, subscriberID := range slowSubscribers {
-		worker.app.log("warn", "live_channel_slow_subscriber_disconnected", map[string]any{
-			"key":          worker.streamCtx.Key,
-			"streamId":     worker.streamCtx.StreamID,
-			"subscriberId": subscriberID,
-		})
-		worker.removeSubscriber(subscriberID)
-	}
 }
 
 func (worker *LiveChannelWorker) removeSubscriber(subscriberID string) {
