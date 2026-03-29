@@ -4,6 +4,8 @@ import { sql } from "./config/db";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { redis } from "./config/redis";
+import { liveChannelRegistry } from "./services/relay/live-channel-registry";
+import { upstreamHealthService } from "./services/proxy/upstream-health-service";
 
 let server: Server | null = null;
 let shuttingDown = false;
@@ -16,6 +18,8 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   logger.info({ signal }, "stream_relay_shutdown_started");
 
+  upstreamHealthService.stop();
+
   await new Promise<void>((resolve) => {
     if (!server) {
       resolve();
@@ -24,6 +28,8 @@ async function shutdown(signal: string) {
 
     server.close(() => resolve());
   }).catch(() => null);
+
+  liveChannelRegistry.shutdown();
 
   await redis.quit().catch(() => redis.disconnect());
 
@@ -41,6 +47,7 @@ async function shutdown(signal: string) {
 async function bootstrap() {
   await sql`SELECT 1`;
   await redis.connect().catch(() => null);
+  upstreamHealthService.start();
 
   const app = createStreamRelayApp();
   server = app.listen(env.STREAM_RELAY_PORT, "0.0.0.0", () => {

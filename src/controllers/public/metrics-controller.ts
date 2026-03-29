@@ -16,16 +16,14 @@ export class MetricsController {
       adminUpstreamService.list(),
     ]);
 
-    const upstreamStatuses = await Promise.all(
-      upstreams.map(async (upstream: any) => ({
-        id: upstream.id,
-        name: upstream.name,
-        status: upstream.status,
-        smartersUrl: upstream.smartersUrl,
-        xciptvDns: upstream.xciptvDns,
-        healthy: await upstreamHealthService.check(upstream),
-      })),
-    );
+    const upstreamStatuses = upstreams.map((upstream: any) => ({
+      id: upstream.id,
+      name: upstream.name,
+      status: upstream.status,
+      smartersUrl: upstream.smartersUrl,
+      xciptvDns: upstream.xciptvDns,
+      healthy: upstream.status === "ACTIVE",
+    }));
 
     const payload = {
       status: upstreamStatuses.some((item) => item.healthy) ? "ok" : "degraded",

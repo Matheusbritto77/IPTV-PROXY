@@ -17,21 +17,55 @@ type AuthenticateInput = {
   streamId?: string;
 };
 
+type CachedAuth = {
+  user: any;
+  expiresAt: number;
+};
+
+const AUTH_CACHE_TTL_MS = 15_000;
+const authCache = new Map<string, CachedAuth>();
+
+function authCacheKey(username: string, password: string) {
+  return `${username}:${password}`;
+}
+
+function pruneAuthCache() {
+  const now = Date.now();
+  for (const [key, entry] of authCache) {
+    if (entry.expiresAt <= now) {
+      authCache.delete(key);
+    }
+  }
+}
+
+setInterval(pruneAuthCache, 60_000).unref();
+
 export class AuthService {
   async authenticate(input: AuthenticateInput) {
     if (!input.username || !input.password) {
       throw new HttpError(400, "missing_credentials");
     }
 
-    const user = await userRepository.findByUsername(input.username);
-    if (!user) {
-      throw new HttpError(401, "invalid_credentials");
-    }
+    const cacheKey = authCacheKey(input.username, input.password);
+    const cached = authCache.get(cacheKey);
 
-    const validPassword = await bcrypt.compare(input.password, user.passwordHash);
-    if (!validPassword) {
-      await requestGuardService.blockIp(input.ipAddress, 300);
-      throw new HttpError(401, "invalid_credentials");
+    let user: any;
+
+    if (cached && cached.expiresAt > Date.now()) {
+      user = cached.user;
+    } else {
+      user = await userRepository.findByUsername(input.username);
+      if (!user) {
+        throw new HttpError(401, "invalid_credentials");
+      }
+
+      const validPassword = await bcrypt.compare(input.password, user.passwordHash);
+      if (!validPassword) {
+        await requestGuardService.blockIp(input.ipAddress, 300);
+        throw new HttpError(401, "invalid_credentials");
+      }
+
+      authCache.set(cacheKey, { user, expiresAt: Date.now() + AUTH_CACHE_TTL_MS });
     }
 
     accessPolicy.assertUserCanAuthenticate(user);
@@ -60,16 +94,25 @@ export class AuthService {
       });
     }
 
-    await auditEventBus.publish({
+    // fire-and-forget: don't block stream for audit log
+    void auditEventBus.publish({
       userId: user.id,
       eventType: "auth.success",
       message: "Authentication succeeded",
       payload: { sessionId: session.id, ipAddress: input.ipAddress },
     });
 
-    await requestGuardService.heartbeat(user.id, input.deviceId);
+    void requestGuardService.heartbeat(user.id, input.deviceId);
 
     return { user, session };
+  }
+
+  invalidateCache(username: string) {
+    for (const [key] of authCache) {
+      if (key.startsWith(`${username}:`)) {
+        authCache.delete(key);
+      }
+    }
   }
 }
 

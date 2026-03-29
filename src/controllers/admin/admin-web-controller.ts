@@ -18,17 +18,15 @@ export class AdminWebController {
       requestGuardService.getMetrics(),
       metricsHistoryService.list(),
     ]);
-    const upstreamStates = await Promise.all(
-      upstreams.map(async (upstream: any) => ({
-        id: upstream.id,
-        name: upstream.name,
-        smartersUrl: upstream.smartersUrl,
-        xciptvDns: upstream.xciptvDns,
-        status: upstream.status,
-        timeoutMs: upstream.timeoutMs,
-        healthy: await upstreamHealthService.check(upstream),
-      })),
-    );
+    const upstreamStates = upstreams.map((upstream: any) => ({
+      id: upstream.id,
+      name: upstream.name,
+      smartersUrl: upstream.smartersUrl,
+      xciptvDns: upstream.xciptvDns,
+      status: upstream.status,
+      timeoutMs: upstream.timeoutMs,
+      healthy: upstream.status === "ACTIVE",
+    }));
 
     res.type("text/html");
     return res.send(

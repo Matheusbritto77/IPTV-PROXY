@@ -1,3 +1,5 @@
+import http from "node:http";
+import https from "node:https";
 import axios, { type AxiosInstance } from "axios";
 import { env } from "../../config/env";
 import { logger } from "../../config/logger";
@@ -9,12 +11,28 @@ type UpstreamCredentials = {
   password: string;
 };
 
+const keepAliveHttpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  timeout: 60_000,
+});
+
+const keepAliveHttpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 256,
+  maxFreeSockets: 64,
+  timeout: 60_000,
+});
+
 export class XtreamUpstreamAdapter {
   private readonly client: AxiosInstance;
 
   constructor() {
     this.client = axios.create({
       timeout: env.UPSTREAM_TIMEOUT_MS,
+      httpAgent: keepAliveHttpAgent,
+      httpsAgent: keepAliveHttpsAgent,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) IPTVStreamPlayer/1.0",
@@ -129,22 +147,18 @@ export class XtreamUpstreamAdapter {
     extension: string,
     range?: string,
   ) {
-    let lastStatus = 500;
-    for (const url of this.buildStreamUrls(credentials, streamType, streamId, extension)) {
-      const response = await this.client.get(url, {
-        responseType: "stream",
-        headers: range ? { Range: range } : undefined,
-        validateStatus: () => true,
-      });
+    const url = `${credentials.baseUrl}/${streamType}/${credentials.username}/${credentials.password}/${streamId}.${extension}`;
+    const response = await this.client.get(url, {
+      responseType: "stream",
+      headers: range ? { Range: range } : undefined,
+      validateStatus: () => true,
+    });
 
-      if (response.status < 400) {
-        return response;
-      }
-
-      lastStatus = response.status;
+    if (response.status < 400) {
+      return response;
     }
 
-    throw new HttpError(lastStatus, "upstream_stream_failed");
+    throw new HttpError(response.status, "upstream_stream_failed");
   }
 
   buildStreamUrl(

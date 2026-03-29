@@ -5,6 +5,7 @@ import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { redis } from "./config/redis";
 import { bootstrapService } from "./services/admin/bootstrap-service";
+import { upstreamHealthService } from "./services/proxy/upstream-health-service";
 
 let server: Server | null = null;
 let shuttingDown = false;
@@ -16,6 +17,8 @@ async function shutdown(signal: string) {
 
   shuttingDown = true;
   logger.info({ signal }, "server_shutdown_started");
+
+  upstreamHealthService.stop();
 
   await new Promise<void>((resolve) => {
     if (!server) {
@@ -43,6 +46,7 @@ async function bootstrap() {
   await sql`SELECT 1`;
   await redis.connect().catch(() => null);
   await bootstrapService.run();
+  upstreamHealthService.start();
 
   const app = createApp();
   server = app.listen(env.PORT, "0.0.0.0", () => {

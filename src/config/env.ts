@@ -20,7 +20,7 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().default(30),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().default(120),
-  UPSTREAM_TIMEOUT_MS: z.coerce.number().default(8000),
+  UPSTREAM_TIMEOUT_MS: z.coerce.number().default(4000),
   LIVE_CHANNEL_DRAIN_TTL_MS: z.coerce.number().default(15000),
   LIVE_CHANNEL_RECONNECT_DELAY_MS: z.coerce.number().default(1000),
   LIVE_CHANNEL_RING_BUFFER_CHUNKS: z.coerce.number().default(32),

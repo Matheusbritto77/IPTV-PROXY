@@ -148,8 +148,8 @@ export class XtreamController {
       streamId,
     });
 
-    const upstreamUrl = await upstreamGatewayService.buildStreamUrl(user, streamType, streamId, extension);
     if (env.STREAM_MODE === "redirect") {
+      const upstreamUrl = await upstreamGatewayService.buildStreamUrl(user, streamType, streamId, extension);
       return res.redirect(302, upstreamUrl);
     }
 

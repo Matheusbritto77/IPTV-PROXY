@@ -13,6 +13,9 @@ type ResolvedCredentials = {
   password: string;
 };
 
+const credentialsCache = new Map<string, { credentials: ResolvedCredentials; expiresAt: number }>();
+const CREDENTIALS_TTL_MS = 30_000;
+
 export class UpstreamGatewayService {
   private buildResolvedCredentials(user: UserWithUpstream, upstream: any): ResolvedCredentials {
     const apiBaseUrl = upstream?.xciptvDns || upstream?.smartersUrl;
@@ -28,28 +31,35 @@ export class UpstreamGatewayService {
     };
   }
 
-  private isAuthZero(payload: any) {
-    return Number(payload?.user_info?.auth ?? 1) === 0;
-  }
-
   private async resolveBaseUpstream(user: UserWithUpstream) {
     const preferred = await upstreamRepository.findById(user.upstreamId);
-    const candidate = await upstreamHealthService.pickCandidate(preferred);
+    const candidate = upstreamHealthService.pickCandidate(preferred);
     if (!candidate) {
-      throw new Error("no_upstream_available");
+      const fallback = await upstreamHealthService.pickCandidateAsync(null);
+      if (!fallback) {
+        throw new Error("no_upstream_available");
+      }
+      return fallback;
     }
 
-    const healthy = await upstreamHealthService.check(candidate);
-    const upstream = healthy ? candidate : await upstreamHealthService.pickCandidate(null);
-    if (!upstream) {
-      throw new Error("no_healthy_upstream_available");
-    }
-
-    return upstream;
+    return candidate;
   }
 
   async resolveCredentials(user: UserWithUpstream) {
-    return this.buildResolvedCredentials(user, await this.resolveBaseUpstream(user));
+    const cacheKey = user.upstreamId;
+    const cached = credentialsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return {
+        ...cached.credentials,
+        username: env.BOOTSTRAP_UPSTREAM_USERNAME || user.upstreamUsername,
+        password: env.BOOTSTRAP_UPSTREAM_PASSWORD || user.upstreamPassword,
+      };
+    }
+
+    const upstream = await this.resolveBaseUpstream(user);
+    const credentials = this.buildResolvedCredentials(user, upstream);
+    credentialsCache.set(cacheKey, { credentials, expiresAt: Date.now() + CREDENTIALS_TTL_MS });
+    return credentials;
   }
 
   private distinctBaseUrls(...values: Array<string | null | undefined>) {
@@ -202,24 +212,13 @@ export class UpstreamGatewayService {
     range?: string,
   ) {
     const credentials = await this.resolveCredentials(user);
-    const baseUrls = this.distinctBaseUrls(credentials.streamBaseUrl, credentials.playlistBaseUrl);
-    let lastError: unknown;
-
-    for (const baseUrl of baseUrls) {
-      try {
-        return await xtreamUpstreamAdapter.proxyStream(
-          { ...credentials, baseUrl } as any,
-          streamType,
-          streamId,
-          extension,
-          range,
-        );
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    throw lastError ?? new Error("upstream_stream_failed");
+    return xtreamUpstreamAdapter.proxyStream(
+      { ...credentials, baseUrl: credentials.streamBaseUrl } as any,
+      streamType,
+      streamId,
+      extension,
+      range,
+    );
   }
 
   async buildStreamUrl(
