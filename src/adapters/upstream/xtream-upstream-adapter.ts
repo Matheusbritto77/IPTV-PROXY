@@ -30,7 +30,8 @@ const USER_AGENTS = [
 ];
 
 function getRandomUserAgent(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  const index = Math.floor(Math.random() * USER_AGENTS.length);
+  return USER_AGENTS[index]!;
 }
 
 const keepAliveHttpAgent = new http.Agent({
@@ -170,25 +171,54 @@ export class XtreamUpstreamAdapter {
     range?: string,
   ) {
     const url = `${credentials.baseUrl}/${streamType}/${credentials.username}/${credentials.password}/${streamId}.${extension}`;
-    const headers: Record<string, string> = {};
-    if (streamType === "live") {
-      headers["User-Agent"] = getRandomUserAgent();
+    const isLive = streamType === "live";
+    const defaultUA = String(this.client.defaults.headers["User-Agent"] || "");
+    const userAgent = isLive ? getRandomUserAgent() : defaultUA;
+
+    const headers: Record<string, string> = {
+      "User-Agent": userAgent,
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+    };
+
+    if (isLive) {
+      // Força o encerramento da conexão no upstream para garantir 
+      // que cada canal seja uma sessão isolada e pura.
+      headers.Connection = "close";
     }
+
     if (range) {
       headers.Range = range;
     }
+
+    logger.debug({ 
+      streamId, 
+      streamType, 
+      userAgent, 
+      connection: headers.Connection || "keep-alive" 
+    }, "upstream_proxy_stream_request");
+
     const response = await this.client.get(url, {
       responseType: "stream",
-      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      headers,
       validateStatus: () => true,
     });
 
     if (response.status < 400) {
+      logger.info(
+        { streamId, status: response.status, userAgent },
+        "upstream_proxy_stream_connected",
+      );
       return response;
     }
 
+    logger.error(
+      { streamId, status: response.status, url },
+      "upstream_proxy_stream_failed",
+    );
     throw new HttpError(response.status, "upstream_stream_failed");
   }
+
 
   buildStreamUrl(
     credentials: UpstreamCredentials,
