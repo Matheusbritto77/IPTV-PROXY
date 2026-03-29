@@ -182,6 +182,16 @@ export class UpstreamGatewayService {
     ).data;
   }
 
+  async callPlayerApi(user: UserWithUpstream, params: Record<string, string>) {
+    const credentials = await this.resolveCredentials(user);
+    return (
+      await xtreamUpstreamAdapter.getPlayerApi({
+        ...credentials,
+        baseUrl: credentials.apiBaseUrl,
+      } as any, params)
+    ).data;
+  }
+
   async getXmltv(user: UserWithUpstream) {
     const credentials = await this.resolveCredentials(user);
     return (await xtreamUpstreamAdapter.getXmltv({ ...credentials, baseUrl: credentials.apiBaseUrl } as any))
