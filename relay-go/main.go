@@ -56,7 +56,6 @@ type RelayApp struct {
 	appClient      *http.Client
 	upstreamClient *http.Client
 	registry       *LiveChannelRegistry
-	viewers        *LiveViewerTracker
 }
 
 type RelayMetrics struct {
@@ -119,7 +118,6 @@ func main() {
 		upstreamClient: upstreamClient,
 	}
 	app.registry = NewLiveChannelRegistry(app)
-	app.viewers = NewLiveViewerTracker()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", app.handleHealthz)
@@ -228,43 +226,6 @@ func (app *RelayApp) handleRelay(w http.ResponseWriter, r *http.Request) {
 				"range":     rangeHeader,
 				"ifRange":   r.Header.Get("If-Range"),
 			})
-		}
-
-		if !app.registry.HasWorker(ctx.Key) {
-			activeViewers, release := app.viewers.Acquire(ctx.Key)
-			defer release()
-
-			if activeViewers <= 1 {
-				app.log("info", "live_direct_passthrough", map[string]any{
-					"key":           ctx.Key,
-					"streamId":      streamID,
-					"activeViewers": activeViewers,
-				})
-
-				if err := app.proxyOneShot(r.Context(), ctx, responseWriter, r); err != nil {
-					if errors.Is(err, errClientDisconnected) || errors.Is(r.Context().Err(), context.Canceled) {
-						app.log("info", "stream_proxy_client_disconnected", map[string]any{
-							"key":        ctx.Key,
-							"streamId":   streamID,
-							"streamType": streamType,
-							"extension":  extension,
-						})
-						return
-					}
-
-					app.log("error", "stream_proxy_failed", map[string]any{
-						"key":        ctx.Key,
-						"streamId":   streamID,
-						"streamType": streamType,
-						"extension":  extension,
-						"error":      err.Error(),
-					})
-					if !responseWriter.wroteHeader {
-						writeJSONError(responseWriter, http.StatusBadGateway, "upstream_stream_failed")
-					}
-				}
-				return
-			}
 		}
 
 		if err := app.registry.Subscribe(ctx, responseWriter, r); err != nil {
@@ -485,21 +446,10 @@ type LiveChannelRegistry struct {
 	workers map[string]*LiveChannelWorker
 }
 
-type LiveViewerTracker struct {
-	mu     sync.Mutex
-	counts map[string]int
-}
-
 func NewLiveChannelRegistry(app *RelayApp) *LiveChannelRegistry {
 	return &LiveChannelRegistry{
 		app:     app,
 		workers: make(map[string]*LiveChannelWorker),
-	}
-}
-
-func NewLiveViewerTracker() *LiveViewerTracker {
-	return &LiveViewerTracker{
-		counts: make(map[string]int),
 	}
 }
 
@@ -508,26 +458,6 @@ func (registry *LiveChannelRegistry) HasWorker(key string) bool {
 	defer registry.mu.Unlock()
 	_, ok := registry.workers[key]
 	return ok
-}
-
-func (tracker *LiveViewerTracker) Acquire(key string) (int, func()) {
-	tracker.mu.Lock()
-	tracker.counts[key]++
-	current := tracker.counts[key]
-	tracker.mu.Unlock()
-
-	return current, func() {
-		tracker.mu.Lock()
-		defer tracker.mu.Unlock()
-
-		remaining := tracker.counts[key] - 1
-		if remaining <= 0 {
-			delete(tracker.counts, key)
-			return
-		}
-
-		tracker.counts[key] = remaining
-	}
 }
 
 func (registry *LiveChannelRegistry) Subscribe(streamContext StreamContext, w http.ResponseWriter, r *http.Request) error {
@@ -610,28 +540,19 @@ type LiveChannelWorker struct {
 }
 
 type Subscriber struct {
-	id          string
-	writer      http.ResponseWriter
-	flusher     http.Flusher
-	done        chan struct{}
-	doneOnce    sync.Once
-	requestCtx  context.Context
-	connectedAt time.Time
-	initialized bool
-	notify      chan struct{}
-	mu          sync.Mutex
-	pending     []byte
-	pendingPos  int
-	closed      bool
-	writeSlice  int
-	dropCount   int
-	dropBytes   int64
-	lastDropLog time.Time
-}
-
-type DropSummary struct {
-	Count int
-	Bytes int64
+	id           string
+	writer       http.ResponseWriter
+	flusher      http.Flusher
+	done         chan struct{}
+	doneOnce     sync.Once
+	requestCtx   context.Context
+	connectedAt  time.Time
+	initialized  bool
+	notify       chan struct{}
+	mu           sync.Mutex
+	pending      [][]byte
+	pendingBytes int64
+	closed       bool
 }
 
 type trackedResponseWriter struct {
@@ -681,7 +602,6 @@ func (worker *LiveChannelWorker) AddSubscriber(w http.ResponseWriter, r *http.Re
 		requestCtx:  r.Context(),
 		connectedAt: time.Now(),
 		notify:      make(chan struct{}, 1),
-		writeSlice:  512,
 	}
 
 	worker.mu.Lock()
@@ -760,6 +680,8 @@ func (worker *LiveChannelWorker) ensureConnected() error {
 		worker.upstreamBody = resp.Body
 		worker.upstreamStatus = resp.StatusCode
 		worker.upstreamHeaders = resp.Header.Clone()
+		worker.ringBuffer = make([][]byte, 0, worker.app.config.RingBufferChunks)
+		worker.ringBufferBytes = 0
 		worker.state = "live"
 		worker.lastError = ""
 		worker.connectErr = nil
@@ -787,10 +709,14 @@ func (worker *LiveChannelWorker) initializeSubscriber(subscriber *Subscriber) {
 
 	status := worker.upstreamStatus
 	headers := worker.upstreamHeaders.Clone()
+	seededPending := subscriber.seedPending(worker.ringBuffer, worker.app.config.MaxSubscriberBufferBytes)
 	subscriber.initialized = true
 	worker.mu.Unlock()
 
 	go worker.runSubscriber(subscriber, status, headers)
+	if seededPending {
+		subscriber.signal()
+	}
 }
 
 func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status int, headers http.Header) {
@@ -798,6 +724,7 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 		close(subscriber.done)
 	})
 
+	sanitizeLiveSubscriberHeaders(headers)
 	copyPassthroughHeaders(subscriber.writer.Header(), headers)
 	subscriber.writer.WriteHeader(status)
 	subscriber.flusher.Flush()
@@ -811,17 +738,15 @@ func (worker *LiveChannelWorker) runSubscriber(subscriber *Subscriber, status in
 			return
 		case <-subscriber.notify:
 			for {
-				chunk, ok := subscriber.takeNextWriteSlice()
+				chunk, ok := subscriber.takeNextChunk()
 				if !ok {
 					break
 				}
 
-				startedAt := time.Now()
 				if err := writeChunk(subscriber.writer, subscriber.flusher, chunk); err != nil {
 					worker.removeSubscriber(subscriber.id)
 					return
 				}
-				subscriber.observeWrite(len(chunk), time.Since(startedAt))
 			}
 		}
 	}
@@ -879,26 +804,39 @@ func (worker *LiveChannelWorker) broadcastChunk(chunk []byte) {
 
 	worker.bytesBroadcast += int64(len(chunk))
 	worker.chunksBroadcast++
+	worker.appendToRingBufferLocked(chunk)
+
+	type slowSubscriber struct {
+		id            string
+		bufferedBytes int64
+	}
+
+	slowSubscribers := make([]slowSubscriber, 0)
 
 	for _, subscriber := range worker.subscribers {
 		if !subscriber.initialized {
 			continue
 		}
 
-		if droppedBytes, dropped := subscriber.offerLatestChunk(chunk); dropped {
-			if summary := subscriber.recordDrop(droppedBytes, time.Now()); summary != nil {
-				worker.app.log("info", "live_channel_subscriber_drops_summary", map[string]any{
-					"key":          worker.streamCtx.Key,
-					"streamId":     worker.streamCtx.StreamID,
-					"subscriberId": subscriber.id,
-					"droppedBytes": summary.Bytes,
-					"droppedCount": summary.Count,
-					"dropReason":   "subscriber_replaced_stale_pending",
-				})
-			}
+		if bufferedBytes, overloaded := subscriber.enqueueChunk(chunk, worker.app.config.MaxSubscriberBufferBytes); overloaded {
+			slowSubscribers = append(slowSubscribers, slowSubscriber{
+				id:            subscriber.id,
+				bufferedBytes: bufferedBytes,
+			})
 		}
 	}
 	worker.mu.Unlock()
+
+	for _, slow := range slowSubscribers {
+		worker.app.log("warn", "live_channel_subscriber_buffer_exceeded", map[string]any{
+			"key":                      worker.streamCtx.Key,
+			"streamId":                 worker.streamCtx.StreamID,
+			"subscriberId":             slow.id,
+			"bufferedBytes":            slow.bufferedBytes,
+			"maxSubscriberBufferBytes": worker.app.config.MaxSubscriberBufferBytes,
+		})
+		worker.removeSubscriber(slow.id)
+	}
 }
 
 func (worker *LiveChannelWorker) removeSubscriber(subscriberID string) {
@@ -910,17 +848,6 @@ func (worker *LiveChannelWorker) removeSubscriber(subscriberID string) {
 	}
 
 	delete(worker.subscribers, subscriberID)
-	if summary := subscriber.flushDropSummary(); summary != nil {
-		worker.app.log("info", "live_channel_subscriber_drops_summary", map[string]any{
-			"key":          worker.streamCtx.Key,
-			"streamId":     worker.streamCtx.StreamID,
-			"subscriberId": subscriber.id,
-			"droppedBytes": summary.Bytes,
-			"droppedCount": summary.Count,
-			"dropReason":   "subscriber_replaced_stale_pending",
-			"final":        true,
-		})
-	}
 	subscriber.close()
 	subscriber.doneOnce.Do(func() {
 		close(subscriber.done)
@@ -1134,54 +1061,72 @@ func (worker *LiveChannelWorker) subscriberCount() int {
 	return len(worker.subscribers)
 }
 
-func (subscriber *Subscriber) offerLatestChunk(chunk []byte) (int, bool) {
+func (subscriber *Subscriber) seedPending(chunks [][]byte, maxBytes int64) bool {
+	subscriber.mu.Lock()
+	defer subscriber.mu.Unlock()
+
+	if subscriber.closed || len(chunks) == 0 {
+		return false
+	}
+
+	start := 0
+	if maxBytes > 0 {
+		var total int64
+		start = len(chunks)
+		for index := len(chunks) - 1; index >= 0; index-- {
+			size := int64(len(chunks[index]))
+			if total+size > maxBytes {
+				break
+			}
+			total += size
+			start = index
+		}
+	}
+
+	for _, chunk := range chunks[start:] {
+		subscriber.pending = append(subscriber.pending, chunk)
+		subscriber.pendingBytes += int64(len(chunk))
+	}
+
+	return len(subscriber.pending) > 0
+}
+
+func (subscriber *Subscriber) enqueueChunk(chunk []byte, maxBytes int64) (int64, bool) {
 	subscriber.mu.Lock()
 	defer subscriber.mu.Unlock()
 
 	if subscriber.closed {
-		return 0, false
+		return subscriber.pendingBytes, false
 	}
 
-	droppedBytes := len(subscriber.pending) - subscriber.pendingPos
-	if droppedBytes < 0 {
-		droppedBytes = 0
+	nextBytes := subscriber.pendingBytes + int64(len(chunk))
+	if maxBytes > 0 && nextBytes > maxBytes {
+		return subscriber.pendingBytes, true
 	}
-	dropped := droppedBytes > 0
-	subscriber.pending = chunk
-	subscriber.pendingPos = 0
 
+	subscriber.pending = append(subscriber.pending, chunk)
+	subscriber.pendingBytes = nextBytes
 	select {
 	case subscriber.notify <- struct{}{}:
 	default:
 	}
-
-	return droppedBytes, dropped
+	return nextBytes, false
 }
 
-func (subscriber *Subscriber) takeNextWriteSlice() ([]byte, bool) {
+func (subscriber *Subscriber) takeNextChunk() ([]byte, bool) {
 	subscriber.mu.Lock()
 	defer subscriber.mu.Unlock()
 
-	if subscriber.closed || len(subscriber.pending) == 0 || subscriber.pendingPos >= len(subscriber.pending) {
+	if subscriber.closed || len(subscriber.pending) == 0 {
 		return nil, false
 	}
 
-	writeSlice := subscriber.writeSlice
-	if writeSlice <= 0 {
-		writeSlice = 512
-	}
-
-	start := subscriber.pendingPos
-	end := start + writeSlice
-	if end > len(subscriber.pending) {
-		end = len(subscriber.pending)
-	}
-
-	chunk := subscriber.pending[start:end]
-	subscriber.pendingPos = end
-	if subscriber.pendingPos >= len(subscriber.pending) {
-		subscriber.pending = nil
-		subscriber.pendingPos = 0
+	chunk := subscriber.pending[0]
+	subscriber.pending[0] = nil
+	subscriber.pending = subscriber.pending[1:]
+	subscriber.pendingBytes -= int64(len(chunk))
+	if subscriber.pendingBytes < 0 {
+		subscriber.pendingBytes = 0
 	}
 	return chunk, true
 }
@@ -1191,88 +1136,14 @@ func (subscriber *Subscriber) close() {
 	defer subscriber.mu.Unlock()
 	subscriber.closed = true
 	subscriber.pending = nil
-	subscriber.pendingPos = 0
+	subscriber.pendingBytes = 0
 }
 
-func (subscriber *Subscriber) observeWrite(bytesWritten int, duration time.Duration) {
-	subscriber.mu.Lock()
-	defer subscriber.mu.Unlock()
-
-	if subscriber.closed || bytesWritten <= 0 {
-		return
+func (subscriber *Subscriber) signal() {
+	select {
+	case subscriber.notify <- struct{}{}:
+	default:
 	}
-
-	current := subscriber.writeSlice
-	if current <= 0 {
-		current = 512
-	}
-
-	switch {
-	case duration >= 60*time.Millisecond:
-		current /= 2
-	case duration >= 30*time.Millisecond:
-		current -= 128
-	case duration <= 2*time.Millisecond:
-		current += 256
-	case duration <= 6*time.Millisecond:
-		current += 128
-	}
-
-	if current < 256 {
-		current = 256
-	}
-	if current > 1024 {
-		current = 1024
-	}
-
-	subscriber.writeSlice = current
-}
-
-func (subscriber *Subscriber) recordDrop(droppedBytes int, now time.Time) *DropSummary {
-	subscriber.mu.Lock()
-	defer subscriber.mu.Unlock()
-
-	if subscriber.closed || droppedBytes <= 0 {
-		return nil
-	}
-
-	subscriber.dropCount++
-	subscriber.dropBytes += int64(droppedBytes)
-	if subscriber.lastDropLog.IsZero() {
-		subscriber.lastDropLog = now
-		return nil
-	}
-
-	if now.Sub(subscriber.lastDropLog) < 2*time.Second {
-		return nil
-	}
-
-	summary := &DropSummary{
-		Count: subscriber.dropCount,
-		Bytes: subscriber.dropBytes,
-	}
-	subscriber.dropCount = 0
-	subscriber.dropBytes = 0
-	subscriber.lastDropLog = now
-	return summary
-}
-
-func (subscriber *Subscriber) flushDropSummary() *DropSummary {
-	subscriber.mu.Lock()
-	defer subscriber.mu.Unlock()
-
-	if subscriber.dropCount == 0 || subscriber.dropBytes == 0 {
-		return nil
-	}
-
-	summary := &DropSummary{
-		Count: subscriber.dropCount,
-		Bytes: subscriber.dropBytes,
-	}
-	subscriber.dropCount = 0
-	subscriber.dropBytes = 0
-	subscriber.lastDropLog = time.Time{}
-	return summary
 }
 
 func copyPassthroughHeaders(target http.Header, source http.Header) {
@@ -1290,6 +1161,12 @@ func writeChunk(w http.ResponseWriter, flusher http.Flusher, chunk []byte) error
 	}
 	flusher.Flush()
 	return nil
+}
+
+func sanitizeLiveSubscriberHeaders(headers http.Header) {
+	headers.Del("Content-Length")
+	headers.Del("Content-Range")
+	headers.Del("Accept-Ranges")
 }
 
 func requiredHeader(r *http.Request, name string) (string, error) {
