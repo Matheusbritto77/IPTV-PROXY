@@ -5,9 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/server.ts",
-    "dev:relay": "bun run --watch src/stream-relay-server.ts",
     "start": "bun run src/server.ts",
-    "start:relay": "bun run src/stream-relay-server.ts",
     "start:migrate": "bun run src/scripts/run-init-migration.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

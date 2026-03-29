@@ -86,7 +86,15 @@ export class XtreamController {
       return res.json(rewrite(await upstreamGatewayService.getVodInfo(user, req.query.vod_id?.toString() || "")));
     }
 
-    return res.status(400).json({ error: "unsupported_action", action });
+    // Passthrough: proxy any unhandled action directly to upstream
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key !== "username" && key !== "password" && value) {
+        params[key] = value.toString();
+      }
+    }
+    const passthroughData = await upstreamGatewayService.callPlayerApi(user, params);
+    return res.json(rewrite(passthroughData));
   }
 
   async playlist(req: Request, res: Response) {

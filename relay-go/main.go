@@ -434,12 +434,25 @@ func (app *RelayApp) openUpstreamPull(ctx context.Context, streamContext StreamC
 	return nil, "", fmt.Errorf("upstream_stream_failed_%d", lastStatus)
 }
 
+func getRandomIP() string {
+	return fmt.Sprintf("%d.%d.%d.%d", rand.Intn(223)+1, rand.Intn(254), rand.Intn(254), rand.Intn(254))
+}
+
 func (app *RelayApp) decorateUpstreamRequest(req *http.Request, original *http.Request) {
 	req.Header.Set("User-Agent", getRandomUserAgent())
 	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+	
+	languages := []string{"pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7", "en-US,en;q=0.9", "es-ES,es;q=0.9", "en-GB,en;q=0.9"}
+	req.Header.Set("Accept-Language", languages[rand.Intn(len(languages))])
+	
 	req.Header.Set("Connection", "close")
 	req.Header.Set("Referer", app.config.AppBaseURL)
+	
+	// IP Spoofing
+	fakeIP := getRandomIP()
+	req.Header.Set("X-Forwarded-For", fakeIP)
+	req.Header.Set("X-Real-IP", fakeIP)
+	req.Header.Set("True-Client-IP", fakeIP)
 
 	if original == nil {
 		return
