@@ -382,6 +382,7 @@ func (app *RelayApp) proxyOneShot(ctx context.Context, streamContext StreamConte
 			"streamType": streamContext.StreamType,
 			"url":        candidate,
 			"status":     response.StatusCode,
+			"userAgent":  req.Header.Get("User-Agent"),
 			"ttfbMs":     time.Since(startedAt).Milliseconds(),
 		})
 		return nil
@@ -417,11 +418,12 @@ func (app *RelayApp) openUpstreamPull(ctx context.Context, streamContext StreamC
 		}
 
 		app.log("info", "live_channel_pull_connected", map[string]any{
-			"key":      streamContext.Key,
-			"streamId": streamContext.StreamID,
-			"url":      candidate,
-			"status":   response.StatusCode,
-			"ttfbMs":   time.Since(startedAt).Milliseconds(),
+			"key":       streamContext.Key,
+			"streamId":  streamContext.StreamID,
+			"url":       candidate,
+			"status":    response.StatusCode,
+			"userAgent": req.Header.Get("User-Agent"),
+			"ttfbMs":    time.Since(startedAt).Milliseconds(),
 		})
 		return response, candidate, nil
 	}
